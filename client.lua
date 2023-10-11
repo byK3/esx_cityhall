@@ -23,8 +23,8 @@ function startThread()
                     spawnNPC()
                 end
 
-                if Config.General.marker.enable then
-                    local marker = Config.General.marker
+                if Config.General.position.marker.enable then
+                    local marker = Config.General.position.marker
                     DrawMarker(marker.type, cityhall.x, cityhall.y, cityhall.z - 0.95, 0.0, 0.0, 0.0, 0, 0.0, 0.0, marker.scale.x, marker.scale.y, marker.scale.z, marker.color.x, marker.color.y, marker.color.z, marker.alpha, false, true, 2, false, false, false, false)
                 end
 
