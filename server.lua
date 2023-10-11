@@ -343,7 +343,7 @@ AddEventHandler('esx:playerLoaded', function(playerId, xPlayer)
         playerTimers[identifier] = true
 
         CreateThread(function()
-            Wait(60000) -- Wartet 60 Sekunden (1 Minute)
+            Wait(60000)
 
             if playerTimers[identifier] then
                 MySQL.Async.fetchScalar('SELECT playtime FROM users WHERE identifier = @identifier', {
