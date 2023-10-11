@@ -8,10 +8,14 @@ function InitializeDatabase()
             PRIMARY KEY (`id`),
             UNIQUE KEY `identifier` (`identifier`)
         );
-        
-        ALTER TABLE users ADD IF NOT EXISTS playtime INT NOT NULL DEFAULT 0;
     ]], {}, function(rowsChanged)
         print("[CITYHALL] - Database initialized")
+    end)
+
+    MySQL.Async.execute([[
+        ALTER TABLE users ADD IF NOT EXISTS playtime INT NOT NULL DEFAULT 0;
+    ]], {}, function(rowsChanged)
+        print("[CITYHALL] - Playtime column added to 'users' table")
     end)
 end
 
