@@ -90,7 +90,8 @@ function OpenMenu()
             elements = {
                 {label = "Social Menu Option", value = "socialmenu"},
                 {label = "Namechange Office", value = "namechange"},
-                {label = "Stats", value = "stats"}
+                {label = "Registry Office", value = "registryOffice"},
+                {label = "Stats", value = "stats"},
             }
         }, function(data, menu)
             if data.current.value == "socialmenu" then
@@ -102,6 +103,9 @@ function OpenMenu()
             elseif data.current.value == "stats" then
                 menu.close()
                 OpenStatsMenu()
+            elseif data.current.value == "registryOffice" then
+                menu.close()
+                OpenRegistryOfficeMenu()
             end
         end, function(data, menu)
             menu.close()
@@ -123,6 +127,7 @@ function OpenMenu()
         end)
     end
 end
+
 
 -- SOCIAL MENU
 
@@ -261,6 +266,7 @@ function OpenStatsMenu()
             local hours = math.floor(stats.playtime / 60)
             local minutes = stats.playtime % 60
             local playtimeFormatted = hours .. " Hour(s) " .. minutes .. " Minute(s)"
+            local marriageStatus = stats.isMarried and ("Married to: " .. stats.spouse) or "Not married"
 
             local elements = {
                 {label = "Firstname: " .. stats.firstname},
@@ -272,7 +278,8 @@ function OpenStatsMenu()
                 {label = "Bank: $" .. stats.bank},
                 {label = "Black-Money: $" .. stats.black_money},
                 {label = "Total Money: $" .. stats.total_money},
-                {label = "Playtime: " .. playtimeFormatted}
+                {label = marriageStatus},
+                {label = "Playtime: " .. playtimeFormatted},
             }
 
             ESX.UI.Menu.Open('default', GetCurrentResourceName(), "stats_menu", {
@@ -303,4 +310,123 @@ function OpenStatsMenu()
         end
     end)
 
+end
+
+
+
+-- MARRIAGE
+
+function OpenRegistryOfficeMenu()
+    ESX.UI.Menu.Open('default', GetCurrentResourceName(), "registryOffice", {
+        title = "Registry Office",
+        align = "top-left",
+        elements = {
+            {label = "Marry", value = "marry"},
+            {label = "Divorce", value = "divorce"},
+            {label = "Information", value = "information"},
+        }
+    }, function(data, menu)
+        if data.current.value == "marry" then
+            OpenMarriageMenu()
+        elseif data.current.value == "divorce" then
+            OpenDivorceMenu()
+        elseif data.current.value == "information" then
+            TriggerServerEvent('k3_cityhall:getMarriageInfo')
+        end
+    end, function(data, menu)
+        menu.close()
+    end)
+end
+
+function OpenMarriageMenu()
+    ESX.UI.Menu.Open('default', GetCurrentResourceName(), "marriage", {
+        title = "Marriage",
+        align = "top-left",
+        elements = {
+            {label = "Send Marriage Request (Closest Player)", value = "marriage_request"},
+        }
+    }, function(data, menu)
+        if data.current.value == "marriage_request" then
+            SendMarriageRequestToClosestPlayer()
+        end
+    end, function(data, menu)
+        menu.close()
+    end)
+end
+
+function SendMarriageRequestToClosestPlayer()
+    local closestPlayer, closestDistance = ESX.Game.GetClosestPlayer()
+
+    if closestPlayer ~= -1 and closestDistance <= 3.0 then
+        TriggerServerEvent("k3_cityhall:sendMarriageRequest", GetPlayerServerId(closestPlayer))
+    else
+        clientNotify("No player nearby to marry")
+    end
+end
+
+RegisterNetEvent('k3_cityhall:receiveMarriageRequest')
+AddEventHandler('k3_cityhall:receiveMarriageRequest', function(requesterId, requesterName)
+    ESX.UI.Menu.Open('default', GetCurrentResourceName(), "marriage_accept_decline", {
+        title = "Marriage Request from " .. requesterName,
+        align = "top-left",
+        elements = {
+            {label = "Accept", value = "accept"},
+            {label = "Decline", value = "decline"}
+        }
+    }, function(data, menu)
+        if data.current.value == "accept" then
+            TriggerServerEvent('k3_cityhall:acceptMarriage', requesterId)
+        elseif data.current.value == "decline" then
+            TriggerServerEvent('k3_cityhall:declineMarriage', requesterId)
+        end
+        menu.close()
+    end, function(data, menu)
+        menu.close()
+    end)
+end)
+
+function OpenDivorceMenu()
+    ESX.TriggerServerCallback('k3_cityhall:getSpouseName', function(spouseName)
+        local elements = {}
+        
+        if spouseName then
+            table.insert(elements, {label = "Spouse: " .. spouseName})
+            table.insert(elements, {label = "Confirm Divorce", value = "confirm_divorce"})
+        else
+            clientNotify("You are not married")
+            ESX.UI.Menu.CloseAll()
+        end
+        
+        table.insert(elements, {label = "Cancel", value = "cancel"})
+
+        ESX.UI.Menu.Open('default', GetCurrentResourceName(), "divorce", {
+            title = "Divorce",
+            align = "top-left",
+            elements = elements
+        }, function(data, menu)
+            if data.current.value == "confirm_divorce" then
+                ESX.UI.Menu.Open('default', GetCurrentResourceName(), "divorce_confirm", {
+                    title = "Are you sure you want to divorce?",
+                    align = "top-left",
+                    elements = {
+                        {label = "Yes, I want to divorce.", value = "yes"},
+                        {label = "No, I don't want to divorce.", value = "no"}
+                    }
+                }, function(data2, menu2)
+                    if data2.current.value == "yes" then
+                        TriggerServerEvent('k3_cityhall:requestDivorce')
+                        ESX.UI.Menu.CloseAll()
+                    else
+                        menu2.close()
+                    end
+                end, function(data2, menu2)
+                    menu2.close()
+                end)
+            elseif data.current.value == "cancel" then
+                menu.close()
+            end
+        end, function(data, menu)
+            menu.close()
+        end)
+    end)
 end
