@@ -18,21 +18,23 @@ function InitializeDatabase()
         print("[CITYHALL] - Playtime column added to 'users' table")
     end)
 end
-
-
 CreateThread(function()
     InitializeDatabase()
 end)
 
-AddEventHandler('esx:playerLoaded', function(source)
-    local playerId = source
-    local xPlayer = ESX.GetPlayerFromId(playerId)
+AddEventHandler('esx:playerLoaded', function(playerId, xPlayer)
+    local identifier = xPlayer.identifier
+
+    -- Social Money Check
     IsPlayerEligibleForSocialMoney(playerId, function(isEligible)
         if isEligible then
             StartSocialMoneyTimer(playerId)
         end
     end)
+
+    StartPlaytimeTracker(playerId, xPlayer.identifier)
 end)
+
 
 function hasAppliedForSocialMoney(identifier, cb)
     MySQL.Async.fetchScalar('SELECT COUNT(*) FROM k3_cityhall_social WHERE identifier = @identifier', {
@@ -79,7 +81,7 @@ AddEventHandler('esx:setJob', function(playerId, job, lastJob)
     local xPlayer = ESX.GetPlayerFromId(playerId)
     local identifier = xPlayer.identifier
 
-    if not IsJobAllowed(job.name, Config.SocialMoney.allowedJobs) then
+    if not isJobAllowed(job.name, Config.SocialMoney.allowedJobs) then
         removeRecipientFromDatabase(identifier, function(removed)
             if removed then
                 TriggerClientEvent('esx:showNotification', playerId, "You are no longer eligible for social money.")
@@ -107,7 +109,7 @@ function IsPlayerEligibleForSocialMoney(playerId, callback)
     local playerJob = xPlayer.job.name
     local allowedJobs = Config.SocialMoney.allowedJobs
 
-    if IsJobAllowed(playerJob, allowedJobs) then
+    if isJobAllowed(playerJob, allowedJobs) then
         hasAppliedForSocialMoney(identifier, function(hasApplied)
             callback(hasApplied)
         end)
@@ -136,13 +138,14 @@ AddEventHandler('k3_cityhall:applyForSocialMoney', function()
         hasAppliedForSocialMoney(identifier, function(hasApplied)
             if not hasApplied then
                 addRecipientToDatabase(identifier)
-                serverNotify(source, "You have successfully applied for social money!")
+                serverNotify(xPlayer.source, "You have successfully applied for social money!")
+                StartSocialMoneyTimer(xPlayer.source)
             else
-                serverNotify(source, "You have already applied for social money!")
+                serverNotify(xPlayer.source, "You have already applied for social money!")
             end
         end)
     else
-        serverNotify(source, "You are not allowed to use this service!")
+        serverNotify(xPlayer.source, "You are not allowed to use this service!")
     end
 end)
 
@@ -154,7 +157,7 @@ AddEventHandler('k3_cityhall:collectStoredSocialMoney', function()
     local identifier = xPlayer.identifier
 
     if Config.SocialMoney.money.automaticMode then
-        serverNotify(source, string.format("Geld automaitsch alle: %s Minuten", Config.SocialMoney.money.paymentSchedule))
+        serverNotify(source, string.format("The social money is automatically collected every ~g~%s~s~ minutes.", Config.SocialMoney.money.paymentSchedule))
     else
         if pendingSocialMoney[identifier] and pendingSocialMoney[identifier] > 0 then
             local amount = pendingSocialMoney[identifier]
@@ -175,9 +178,9 @@ AddEventHandler('k3_cityhall:endSocialMoney', function()
 
     removeRecipientFromDatabase(identifier, function(hasRemoved)
         if hasRemoved then
-            serverNotify(source, "You have successfully ended your social money.")
+            serverNotify(xPlayer.source, "You have successfully ended your social money.")
         else
-            serverNotify(source, "You don't have social money.")
+            serverNotify(xPlayer.source, "You don't have social money.")
         end
     end)
 end)
@@ -198,35 +201,38 @@ end
 local timers = {}
 
 function StartSocialMoneyTimer(src)
-    local identifier = ESX.GetPlayerFromId(src).identifier
+    local xPlayer = ESX.GetPlayerFromId(src)
+    if not xPlayer then return end 
+
+    local identifier = xPlayer.identifier
     local elapsedTime = 0
+    local continueLoop = true
 
     timers[identifier] = elapsedTime
 
     CreateThread(function()
-        while true do
+        while continueLoop do
             Wait(1000)
             elapsedTime = elapsedTime + 1
             timers[identifier] = elapsedTime
 
             if elapsedTime >= Config.SocialMoney.money.paymentSchedule * 60 then
-                local xPlayer = ESX.GetPlayerFromId(playerId)
-                if xPlayer then
-                    if Config.SocialMoney.money.automaticMode then
-                        xPlayer.addAccountMoney('bank', Config.SocialMoney.money.payment)
-                        if Config.SocialMoney.notify.notify then
-                            serverNotify(src, string.format("You have received ~g~$%s~s~ from your social money.", Config.SocialMoney.money.payment))
+                hasAppliedForSocialMoney(identifier, function(hasApplied)
+                    if hasApplied then
+                        if Config.SocialMoney.money.automaticMode then
+                            xPlayer.addAccountMoney('bank', Config.SocialMoney.money.payment)
+                            serverNotify(xPlayer.source, string.format("You received ~g~$%s~s~ from your social money.", Config.SocialMoney.money.payment))
+                        else
+                            StorePendingSocialMoney(identifier, Config.SocialMoney.money.payment)
+                            while pendingSocialMoney[identifier] do
+                                Wait(5000)
+                            end
                         end
+                        elapsedTime = 0
                     else
-                        StorePendingSocialMoney(identifier, Config.SocialMoney.money.payment)
-                        while pendingSocialMoney[identifier] do
-                            Wait(5000)
-                        end
+                        continueLoop = false
                     end
-                else
-                    break
-                end
-                elapsedTime = 0
+                end)
             end
         end
     end)
@@ -338,40 +344,42 @@ end)
 
 --- PLAYTIME TRACKER
 
+local playerPlaytimes = {}
 local playerTimers = {}
 
-AddEventHandler('esx:playerLoaded', function(playerId, xPlayer)
-    local identifier = xPlayer.identifier
+function StartPlaytimeTracker(playerId, identifier)
+    local xPlayer = ESX.GetPlayerFromId(playerId)
+    if not xPlayer then return end
 
     if not playerTimers[identifier] then
         playerTimers[identifier] = true
 
-        CreateThread(function()
-            Wait(60000)
+        MySQL.Async.fetchScalar('SELECT playtime FROM users WHERE identifier = @identifier', {
+            ['@identifier'] = identifier
+        }, function(playtime)
+            playerPlaytimes[identifier] = playtime or 0
 
-            if playerTimers[identifier] then
-                MySQL.Async.fetchScalar('SELECT playtime FROM users WHERE identifier = @identifier', {
-                    ['@identifier'] = identifier
-                }, function(playtime)
-                    if playtime then
-                        local newPlaytime = playtime + 1
-                        MySQL.Async.execute('UPDATE users SET playtime = @newPlaytime WHERE identifier = @identifier', {
-                            ['@newPlaytime'] = newPlaytime,
-                            ['@identifier'] = identifier
-                        })
-                    end
-                end)
-            end
+            CreateThread(function()
+                while playerTimers[identifier] do
+                    Wait(60000)
+                    playerPlaytimes[identifier] = playerPlaytimes[identifier] + 1
+
+                    MySQL.Async.execute('UPDATE users SET playtime = @newPlaytime WHERE identifier = @identifier', {
+                        ['@newPlaytime'] = playerPlaytimes[identifier],
+                        ['@identifier'] = identifier
+                    })
+                end
+            end)
         end)
     end
-end)
+end
 
 AddEventHandler('playerDropped', function(reason)
-    local src = source
-    local xPlayer = ESX.GetPlayerFromId(src)
-    local identifier = xPlayer.identifier
-
-    playerTimers[identifier] = nil
+    local playerId = source
+    local xPlayer = ESX.GetPlayerFromId(playerId)
+    if xPlayer then
+        playerTimers[xPlayer.identifier] = nil
+    end
 end)
 
 
@@ -379,7 +387,7 @@ ESX.RegisterServerCallback('k3_cityhall:getPlayerStats', function(source, cb)
     local xPlayer = ESX.GetPlayerFromId(source)
     local identifier = xPlayer.identifier
 
-    MySQL.Async.fetchAll('SELECT firstname, lastname, sex, dateofbirth, job, playtime FROM users WHERE identifier = @identifier', {
+    MySQL.Async.fetchAll('SELECT firstname, lastname, sex, dateofbirth, playtime FROM users WHERE identifier = @identifier', {
         ['@identifier'] = identifier
     }, function(result)
         if result[1] then
@@ -389,7 +397,7 @@ ESX.RegisterServerCallback('k3_cityhall:getPlayerStats', function(source, cb)
                 lastname = data.lastname,
                 sex = data.sex,
                 dateofbirth = data.dateofbirth,
-                job = data.job,
+                job = xPlayer.job.name,
                 money = xPlayer.getMoney(),
                 bank = xPlayer.getAccount('bank').money,
                 black_money = xPlayer.getAccount('black_money').money,
