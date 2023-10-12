@@ -57,6 +57,33 @@ Config.SocialMoney = {
 }
 
 
+Config.Marriage = {
+
+    general = {
+        allowSameGender = true,
+    },
+
+    cost = {
+        marriagePrice = 1000, -- The price for a marriage
+        marriageDivorcePrice = 500, -- The price for a divorce
+    },
+    
+    item = {
+        needItem = false, -- If true, the player will need the item to marry
+        itemName = "wedding_ring",
+        itemLabel = "Wedding Ring"
+    },
+
+    notify = {
+        notifyAll = true, -- this will notify all players in the server
+        notifyAllmsg = "The player %s is now married with %s", -- %s = name of the player
+    },
+    
+
+
+}
+
+
 -- Change trigger events to your own framework or script
 
 function clientNotify(message)
