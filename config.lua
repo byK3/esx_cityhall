@@ -21,6 +21,7 @@ Config.General = {
         enable = true, -- If false, the NPC will be disabled
         model = "a_m_m_bevhills_01", 
         heading = 0.0,
+        pos = vector3(0.0, 0.0, 0.0),
     },
 
 }
@@ -51,10 +52,6 @@ Config.SocialMoney = {
         payment = 1000, -- The amount of money the player will receive 
         paymentSchedule = 60, -- In minutes
         automaticMode = true, -- If true, the payment will be automatic transferred to the player's bank account /// If false, the player will need to withdraw the money
-    },
-
-    notify = {
-        notify = true, -- If true, the player will be notified when the payment is received
     },
 
 }
