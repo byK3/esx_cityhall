@@ -17,7 +17,22 @@ function InitializeDatabase()
     ]], {}, function(rowsChanged)
         print("[CITYHALL] - Playtime column added to 'users' table")
     end)
+
+    MySQL.Async.execute([[
+        CREATE TABLE IF NOT EXISTS `k3_cityhall_marriage` (
+            `id` INT NOT NULL AUTO_INCREMENT,
+            `player1` VARCHAR(255) NOT NULL,
+            `player2` VARCHAR(255) NOT NULL,
+            `married_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`)
+        );
+    ]], {}, function(rowsChanged)
+        print("[CITYHALL] - 'k3_cityhall_marriage' table initialized")
+    end)
 end
+
+
+
 CreateThread(function()
     InitializeDatabase()
 end)
@@ -404,9 +419,296 @@ ESX.RegisterServerCallback('k3_cityhall:getPlayerStats', function(source, cb)
                 total_money = xPlayer.getMoney() + xPlayer.getAccount('bank').money + xPlayer.getAccount('black_money').money,
                 playtime = data.playtime,
             }
-            cb(stats)
+
+            -- Check marriage status
+            MySQL.Async.fetchAll('SELECT player1, player2 FROM k3_cityhall_marriage WHERE player1 = @identifier OR player2 = @identifier', {
+                ['@identifier'] = identifier
+            }, function(result)
+                if result[1] then
+                    local spouseIdentifier
+                    if result[1].player1 == identifier then
+                        spouseIdentifier = result[1].player2
+                    else
+                        spouseIdentifier = result[1].player1
+                    end
+
+                    MySQL.Async.fetchScalar('SELECT CONCAT(firstname, " ", lastname) as fullname FROM users WHERE identifier = @spouseIdentifier', {
+                        ['@spouseIdentifier'] = spouseIdentifier
+                    }, function(spouseName)
+                        stats.isMarried = true
+                        stats.spouse = spouseName
+                        cb(stats)
+                    end)
+                else
+                    stats.isMarried = false
+                    stats.spouse = "Not married"
+                    cb(stats)
+                end
+            end)
         else
             cb(nil)
+        end
+    end)
+end)
+
+
+
+-- MARRIAGE 
+
+function IsPlayerAlreadyMarried(playerIdentifier, callback)
+    MySQL.Async.fetchScalar('SELECT COUNT(*) FROM k3_cityhall_marriage WHERE player1 = @player OR player2 = @player', {
+        ['@player'] = playerIdentifier
+    }, function(count)
+        callback(count > 0)
+    end)
+end
+
+function AddMarriageToDatabase(player1, player2, callback)
+    MySQL.Async.execute('INSERT INTO k3_cityhall_marriage (player1, player2) VALUES (@player1, @player2)', {
+        ['@player1'] = player1,
+        ['@player2'] = player2
+    }, function(rowsChanged)
+        callback(rowsChanged > 0)
+    end)
+end
+
+function RemoveMarriage(identifier, cb)
+    MySQL.Async.execute('DELETE FROM k3_cityhall_marriage WHERE player1 = @identifier OR player2 = @identifier', {
+        ['@identifier'] = identifier
+    }, function(rowsChanged)
+        cb(rowsChanged > 0)
+    end)
+end
+
+function GetSpouse(identifier, cb)
+    MySQL.Async.fetchScalar('SELECT player1 FROM k3_cityhall_marriage WHERE player2 = @identifier UNION SELECT player2 FROM k3_cityhall_marriage WHERE player1 = @identifier', {
+        ['@identifier'] = identifier
+    }, function(spouseIdentifier)
+        cb(spouseIdentifier)
+    end)
+end
+
+
+RegisterServerEvent("k3_cityhall:sendMarriageRequest")
+AddEventHandler("k3_cityhall:sendMarriageRequest", function(target)
+    local sourcePlayer = source
+    local xPlayer = ESX.GetPlayerFromId(sourcePlayer)
+    local xTarget = ESX.GetPlayerFromId(target)
+
+    if not xTarget or xTarget == -1 then
+        print ("[CITYHALL] - Player not found")
+        return
+    end
+
+    if xPlayer == xTarget then
+        serverNotify(xPlayer.source, "You can't marry yourself!")
+        return
+    end
+
+    IsPlayerAlreadyMarried(xPlayer.identifier, function(isMarried)
+        if isMarried then
+            serverNotify(xPlayer.source, "You are already married!")
+            return
+        end
+
+        IsPlayerAlreadyMarried(xTarget.identifier, function(isMarried)
+            if isMarried then
+                serverNotify(xPlayer.source, "This player is already married!")
+                return
+            end
+
+            MySQL.Async.fetchAll('SELECT identifier, sex FROM users WHERE identifier IN (@sourceIdentifier, @targetIdentifier)', {
+                ['@sourceIdentifier'] = xPlayer.identifier,
+                ['@targetIdentifier'] = xTarget.identifier
+            }, function(result)
+                local sourceSex, targetSex
+                for _, row in ipairs(result) do
+                    if row.identifier == xPlayer.identifier then
+                        sourceSex = row.sex
+                    else
+                        targetSex = row.sex
+                    end
+                end
+
+                if not Config.Marriage.general.allowSameGender and sourceSex == targetSex then
+                    serverNotify(xPlayer.source, "Same-sex marriages are not allowed.")
+                    return
+                end
+
+                if Config.Marriage.item.needItem then
+                    local itemName = Config.Marriage.item.itemName
+                    local item = xPlayer.getInventoryItem(itemName)
+
+                    if not item or item.count <= 0 then
+                        serverNotify(xPlayer.source, "You need a " .. Config.Marriage.item.itemLabel .. " to get married.")
+                        return
+                    end
+                end
+
+                TriggerClientEvent('k3_cityhall:receiveMarriageRequest', xTarget.source, xPlayer.source, xPlayer.getName())
+
+            end)
+        end)
+    end)
+end)
+
+
+RegisterServerEvent('k3_cityhall:acceptMarriage')
+AddEventHandler('k3_cityhall:acceptMarriage', function(requesterId)
+    local sourcePlayer = source
+    local xPlayer = ESX.GetPlayerFromId(sourcePlayer)
+    local xRequester = ESX.GetPlayerFromId(requesterId)
+
+    if not xRequester then
+        serverNotify(xPlayer.source, "The player who proposed is no longer online.")
+        return
+    end
+
+    IsPlayerAlreadyMarried(xRequester.identifier, function(isRequesterMarried)
+        if isRequesterMarried then
+            serverNotify(xRequester.source, "You are already married!")
+            return
+        end
+
+        IsPlayerAlreadyMarried(xPlayer.identifier, function(isTargetMarried)
+            if isTargetMarried then
+                serverNotify(xPlayer.source, "You are already married!")
+                return
+            end
+
+            local canProceed = true
+
+            -- item check
+            if Config.Marriage.item.needItem then
+                local itemName = Config.Marriage.item.itemName
+                local item = xRequester.getInventoryItem(itemName)
+
+                if not item or item.count <= 0 then
+                    serverNotify(xRequester.source, "You no longer have the " .. Config.Marriage.item.itemLabel .. " required for marriage.")
+                    canProceed = false
+                end
+            end
+
+            -- money check
+            local marriagePrice = Config.Marriage.cost.marriagePrice
+            if xRequester.getMoney() < marriagePrice then
+                serverNotify(xRequester.source, "You don't have enough money to get married.")
+                canProceed = false
+            end
+
+            -- proceed
+            if canProceed then
+                AddMarriageToDatabase(xRequester.identifier, xPlayer.identifier, function(success)
+                    if success then
+                        if Config.Marriage.item.needItem then
+                            xRequester.removeInventoryItem(Config.Marriage.item.itemName, 1)
+                        end
+                        xRequester.removeMoney(marriagePrice)
+                        serverNotify(xRequester.source, "Congratulations! You are now married to " .. xPlayer.getName() .. ".")
+                        serverNotify(xPlayer.source, "Congratulations! You are now married to " .. xRequester.getName() .. ".")
+
+                        if Config.Marriage.notifyAll then
+                            local msg = string.format(Config.Marriage.notifyAllmsg, xRequester.getName(), xPlayer.getName())
+                            serverNotify(-1, msg)
+                        end
+                    else
+                        serverNotify(xRequester.source, "There was an error processing the marriage. Please try again.")
+                        serverNotify(xPlayer.source, "There was an error processing the marriage. Please try again.")
+                        print ("[CITYHALL] - Error processing marriage between " .. xRequester.getName() .. " and " .. xPlayer.getName() .. " || Contact the developer!")
+                    end
+                end)
+            end
+        end)
+    end)
+end)
+
+
+RegisterServerEvent('k3_cityhall:declineMarriage')
+AddEventHandler('k3_cityhall:declineMarriage', function(requesterId)
+    local sourcePlayer = source
+    local xPlayer = ESX.GetPlayerFromId(sourcePlayer)
+    local xRequester = ESX.GetPlayerFromId(requesterId)
+    serverNotify(xRequester.source, xPlayer.getName() .. " declined your marriage request.")
+end)
+
+ESX.RegisterServerCallback('k3_cityhall:getSpouseName', function(source, cb)
+    local xPlayer = ESX.GetPlayerFromId(source)
+    local identifier = xPlayer.identifier
+
+    MySQL.Async.fetchAll('SELECT player1, player2 FROM k3_cityhall_marriage WHERE player1 = @identifier OR player2 = @identifier', {
+        ['@identifier'] = identifier
+    }, function(result)
+        if result[1] then
+            local spouseIdentifier = (result[1].player1 == identifier) and result[1].player2 or result[1].player1
+
+            MySQL.Async.fetchScalar('SELECT CONCAT(firstname, " ", lastname) as fullname FROM users WHERE identifier = @spouseIdentifier', {
+                ['@spouseIdentifier'] = spouseIdentifier
+            }, function(spouseName)
+                if spouseName then
+                    cb(spouseName)
+                else
+                    cb(nil)
+                end
+            end)
+        else
+            cb(nil)
+        end
+    end)
+end)
+
+
+RegisterServerEvent('k3_cityhall:requestDivorce')
+AddEventHandler('k3_cityhall:requestDivorce', function()
+    local xPlayer = ESX.GetPlayerFromId(source)
+    local identifier = xPlayer.identifier
+
+    IsPlayerAlreadyMarried(identifier, function(isMarried)
+        if isMarried then
+            GetSpouse(identifier, function(spouseIdentifier)
+                RemoveMarriage(identifier, function(success)
+                    if success then
+                        serverNotify(xPlayer.source, "You have divorced your partner.")
+                        
+                        local xSpouse = ESX.GetPlayerFromIdentifier(spouseIdentifier)
+                        if xSpouse then
+                            serverNotify(xSpouse.source, "Your partner has divorced you.")
+                        end
+                    else
+                        print ("[CITYHALL] - Error processing divorce between " .. xPlayer.getName() .. " and " .. xSpouse.getName() .. " || Contact the developer!")
+                        serverNotify(xPlayer.source, "There was an error processing the divorce. Please try again.")
+                    end
+                end)
+            end)
+        else
+            TriggerClientEvent('esx:showNotification', xPlayer.source, "You are not married.")
+        end
+    end)
+end)
+
+RegisterServerEvent('k3_cityhall:getMarriageInfo')
+AddEventHandler('k3_cityhall:getMarriageInfo', function()
+    local xPlayer = ESX.GetPlayerFromId(source)
+    local identifier = xPlayer.identifier
+
+    MySQL.Async.fetchAll('SELECT player1, player2, DATE_FORMAT(married_at, "%d-%m-%Y") as marriedDate FROM k3_cityhall_marriage WHERE player1 = @identifier OR player2 = @identifier', {
+        ['@identifier'] = identifier
+    }, function(result)
+        if result[1] then
+            local spouseIdentifier = (result[1].player1 == identifier) and result[1].player2 or result[1].player1
+            local marriedDate = result[1].marriedDate
+
+            MySQL.Async.fetchScalar('SELECT CONCAT(firstname, " ", lastname) as fullname FROM users WHERE identifier = @identifier', {
+                ['@identifier'] = spouseIdentifier
+            }, function(spouseName)
+                if spouseName then
+                    serverNotify (xPlayer.source, "You are married to " .. spouseName .. " since " .. marriedDate .. ".")
+                else
+                    print ("[CITYHALL] - Error fetching spouse's name for " .. xPlayer.getName() .. " || Contact the developer!")
+                    serverNotify (xPlayer.source, "Error fetching spouse's name - Try again later.")
+                end
+            end)
+        else
+            serverNotify (xPlayer.source, "You are not married.")
         end
     end)
 end)
