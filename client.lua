@@ -60,8 +60,10 @@ function spawnNPC()
         while not HasModelLoaded(model) do
             Wait(1)
         end
+        print("[DEBUG] NPC model loaded!")
 
-        npc = CreatePed(4, model, Config.General.position.coords.x, Config.General.position.coords.y, Config.General.position.coords.z - 1.0, Config.General.npc.heading, false, true)
+        npc = CreatePed(4, model, Config.General.npc.pos.x, Config.General.npc.pos.y, Config.General.npc.pos.z, Config.General.npc.heading, false, true)
+        print("[DEBUG] NPC created with entity ID: " .. npc)
         SetEntityAsMissionEntity(npc, true, true)
         SetBlockingOfNonTemporaryEvents(npc, true)
         FreezeEntityPosition(npc, true)
@@ -70,7 +72,7 @@ function spawnNPC()
         SetPedCanPlayAmbientAnims(npc, true)
         SetPedCanRagdollFromPlayerImpact(npc, false)
         SetEntityDynamic(npc, true)
-        SetEntityVisible(npc, false, false)
+        SetEntityVisible(npc, true, false)
     end
 end
 
@@ -196,25 +198,25 @@ function OpenNameChangeMenu()
                 {label = "Current Name: " .. firstName .. " " .. lastName, value = "current_name"},
                 {label = "Change Firstname", value = "change_firstname"},
                 {label = "Change Lastname", value = "change_lastname"},
-                {label = "Save Name (Price: $" .. Config.NameChange.price .. ")", value = "save_changes"}
+                {label = "Save Name (Price: $" .. Config.Namechange.price .. ")", value = "save_changes"}
             }
 
             if newFirstName then
-                table.insert(elements, 2, {label = "Neuer Vorname: " .. newFirstName, value = "new_firstname"})
+                table.insert(elements, 2, {label = "New Firstname: " .. newFirstName, value = "new_firstname"})
             end
 
             if newLastName then
-                table.insert(elements, 3 + (newFirstName and 1 or 0), {label = "Neuer Nachname: " .. newLastName, value = "new_lastname"})
+                table.insert(elements, 3 + (newFirstName and 1 or 0), {label = "New Lastname: " .. newLastName, value = "new_lastname"})
             end
 
             ESX.UI.Menu.Open('default', GetCurrentResourceName(), 'namechange', {
-                title = "Name ändern",
+                title = "Change name",
                 align = "top-left",
                 elements = elements
             }, function(data, menu)
                 if data.current.value == "change_firstname" then
                     ESX.UI.Menu.Open('dialog', GetCurrentResourceName(), 'firstname_dialog', {
-                        title = "Neuen Vornamen eingeben"
+                        title = "Enter new firstname"
                     }, function(data2, menu2)
                         newFirstName = data2.value
                         menu2.close()
@@ -224,7 +226,7 @@ function OpenNameChangeMenu()
                     end)
                 elseif data.current.value == "change_lastname" then
                     ESX.UI.Menu.Open('dialog', GetCurrentResourceName(), 'lastname_dialog', {
-                        title = "Neuen Nachnamen eingeben"
+                        title = "Enter new lastname"
                     }, function(data2, menu2)
                         newLastName = data2.value
                         menu2.close()
@@ -234,10 +236,14 @@ function OpenNameChangeMenu()
                     end)
                 elseif data.current.value == "save_changes" then
                     TriggerServerEvent('k3_cityhall:changeName', newFirstName, newLastName)
+                    newFirstName = nil
+                    newLastName = nil
                     menu.close()
                 end
             end, function(data, menu)
                 menu.close()
+                newFirstName = nil
+                newLastName = nil
             end)
         else
             print ("Error: Callback returned no name")
