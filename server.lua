@@ -499,7 +499,8 @@ RegisterServerEvent('k3_cityhall:addDeath')
 AddEventHandler('k3_cityhall:addDeath', function()
     local xPlayer = ESX.GetPlayerFromId(source)
     if xPlayer then
-        AddDeath(xPlayer.identifier)
+        AddDeathForPlayer(xPlayer.identifier)
+        UpdateKDForPlayer(xPlayer.identifier)
     end
 end)
 
@@ -507,7 +508,8 @@ RegisterServerEvent('k3_cityhall:addKill')
 AddEventHandler('k3_cityhall:addKill', function()
     local xPlayer = ESX.GetPlayerFromId(source)
     if xPlayer then
-        AddKill(xPlayer.identifier) 
+        AddKillForPlayer(xPlayer.identifier)
+        UpdateKDForPlayer(xPlayer.identifier)
     end
 end)
 
