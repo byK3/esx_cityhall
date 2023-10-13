@@ -280,6 +280,10 @@ function OpenStatsMenu()
                 {label = "Total Money: $" .. stats.total_money},
                 {label = marriageStatus},
                 {label = "Playtime: " .. playtimeFormatted},
+                {label = "Kills: " .. stats.kills},
+                {label = "Deaths: " .. stats.deaths},
+                {label = "KD: " .. stats.kd_ratio},
+                {label = "Vehicles: " .. stats.vehicles},
             }
 
             ESX.UI.Menu.Open('default', GetCurrentResourceName(), "stats_menu", {
@@ -309,9 +313,15 @@ function OpenStatsMenu()
             end
         end
     end)
-
 end
 
+AddEventHandler('baseevents:onPlayerDied', function(killerType, coords)
+    TriggerServerEvent('k3_cityhall:addDeath')
+end)
+
+AddEventHandler('baseevents:onPlayerKilled', function(killerId, data)
+    TriggerServerEvent('k3_cityhall:addKill')
+end)
 
 
 -- MARRIAGE
