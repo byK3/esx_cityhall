@@ -13,11 +13,15 @@ function InitializeDatabase()
     end)
 
     MySQL.Async.execute([[
-        ALTER TABLE users ADD IF NOT EXISTS playtime INT NOT NULL DEFAULT 0;
+        ALTER TABLE users 
+        ADD IF NOT EXISTS playtime INT NOT NULL DEFAULT 0,
+        ADD IF NOT EXISTS kills INT NOT NULL DEFAULT 0,
+        ADD IF NOT EXISTS deaths INT NOT NULL DEFAULT 0,
+        ADD IF NOT EXISTS kd_ratio FLOAT(5,2) NOT NULL DEFAULT 0.00;
     ]], {}, function(rowsChanged)
-        print("[CITYHALL] - Playtime column added to 'users' table")
+        print("[CITYHALL] - 'playtime', 'kills', 'deaths', and 'kd_ratio' columns added to 'users' table")
     end)
-
+    
     MySQL.Async.execute([[
         CREATE TABLE IF NOT EXISTS `k3_cityhall_marriage` (
             `id` INT NOT NULL AUTO_INCREMENT,
@@ -357,7 +361,7 @@ end)
 
 
 
---- PLAYTIME TRACKER
+--- PLAYTIME TRACKER & STATS
 
 local playerPlaytimes = {}
 local playerTimers = {}
@@ -402,7 +406,7 @@ ESX.RegisterServerCallback('k3_cityhall:getPlayerStats', function(source, cb)
     local xPlayer = ESX.GetPlayerFromId(source)
     local identifier = xPlayer.identifier
 
-    MySQL.Async.fetchAll('SELECT firstname, lastname, sex, dateofbirth, playtime FROM users WHERE identifier = @identifier', {
+    MySQL.Async.fetchAll('SELECT firstname, lastname, sex, dateofbirth, playtime, kills, deaths, kd_ratio FROM users WHERE identifier = @identifier', {
         ['@identifier'] = identifier
     }, function(result)
         if result[1] then
@@ -418,37 +422,93 @@ ESX.RegisterServerCallback('k3_cityhall:getPlayerStats', function(source, cb)
                 black_money = xPlayer.getAccount('black_money').money,
                 total_money = xPlayer.getMoney() + xPlayer.getAccount('bank').money + xPlayer.getAccount('black_money').money,
                 playtime = data.playtime,
+                kills = data.kills,
+                deaths = data.deaths,
+                kd_ratio = data.kd_ratio
             }
 
-            -- Check marriage status
-            MySQL.Async.fetchAll('SELECT player1, player2 FROM k3_cityhall_marriage WHERE player1 = @identifier OR player2 = @identifier', {
+            
+            -- Get the number of owned vehicles
+            MySQL.Async.fetchScalar('SELECT COUNT(*) FROM owned_vehicles WHERE owner = @identifier', {
                 ['@identifier'] = identifier
-            }, function(result)
-                if result[1] then
-                    local spouseIdentifier
-                    if result[1].player1 == identifier then
-                        spouseIdentifier = result[1].player2
-                    else
-                        spouseIdentifier = result[1].player1
-                    end
+            }, function(vehicleCount)
+                stats.vehicles = vehicleCount
 
-                    MySQL.Async.fetchScalar('SELECT CONCAT(firstname, " ", lastname) as fullname FROM users WHERE identifier = @spouseIdentifier', {
-                        ['@spouseIdentifier'] = spouseIdentifier
-                    }, function(spouseName)
-                        stats.isMarried = true
-                        stats.spouse = spouseName
+                -- Check marriage status
+                MySQL.Async.fetchAll('SELECT player1, player2 FROM k3_cityhall_marriage WHERE player1 = @identifier OR player2 = @identifier', {
+                    ['@identifier'] = identifier
+                }, function(result)
+                    if result[1] then
+                        local spouseIdentifier
+                        if result[1].player1 == identifier then
+                            spouseIdentifier = result[1].player2
+                        else
+                            spouseIdentifier = result[1].player1
+                        end
+
+                        MySQL.Async.fetchScalar('SELECT CONCAT(firstname, " ", lastname) as fullname FROM users WHERE identifier = @spouseIdentifier', {
+                            ['@spouseIdentifier'] = spouseIdentifier
+                        }, function(spouseName)
+                            stats.isMarried = true
+                            stats.spouse = spouseName
+                            cb(stats)
+                        end)
+                    else
+                        stats.isMarried = false
+                        stats.spouse = "Not married"
                         cb(stats)
-                    end)
-                else
-                    stats.isMarried = false
-                    stats.spouse = "Not married"
-                    cb(stats)
-                end
+                    end
+                end)
             end)
         else
             cb(nil)
         end
     end)
+end)
+
+function AddKillForPlayer(identifier)
+    MySQL.Async.execute('UPDATE users SET kills = kills + 1 WHERE identifier = @identifier', {
+        ['@identifier'] = identifier
+    })
+end
+
+function AddDeathForPlayer(identifier)
+    MySQL.Async.execute('UPDATE users SET deaths = deaths + 1 WHERE identifier = @identifier', {
+        ['@identifier'] = identifier
+    })
+end
+
+function UpdateKDForPlayer(identifier)
+    MySQL.Async.fetchAll('SELECT kills, deaths FROM users WHERE identifier = @identifier', {
+        ['@identifier'] = identifier
+    }, function(result)
+        if result[1] then
+            local kills = result[1].kills
+            local deaths = result[1].deaths
+            local kd = (deaths == 0) and kills or (kills / deaths)
+            
+            MySQL.Async.execute('UPDATE users SET kd_ratio = @kd WHERE identifier = @identifier', {
+                ['@identifier'] = identifier,
+                ['@kd'] = kd
+            })
+        end
+    end)
+end
+
+RegisterServerEvent('k3_cityhall:addDeath')
+AddEventHandler('k3_cityhall:addDeath', function()
+    local xPlayer = ESX.GetPlayerFromId(source)
+    if xPlayer then
+        AddDeath(xPlayer.identifier)
+    end
+end)
+
+RegisterServerEvent('k3_cityhall:addKill')
+AddEventHandler('k3_cityhall:addKill', function()
+    local xPlayer = ESX.GetPlayerFromId(source)
+    if xPlayer then
+        AddKill(xPlayer.identifier) 
+    end
 end)
 
 
@@ -712,3 +772,4 @@ AddEventHandler('k3_cityhall:getMarriageInfo', function()
         end
     end)
 end)
+
