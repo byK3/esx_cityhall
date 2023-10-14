@@ -54,9 +54,14 @@ AddEventHandler('esx:playerLoaded', function(playerId, xPlayer)
         end)
     end
 
-    StartPlaytimeTracker(playerId, xPlayer.identifier)
+    StartPlaytimeTracker(playerId, identifier)
 end)
 
+AddEventHandler('onResourceStart', function(resourceName) --if the script restarts for some reason it should start the timer again
+    if resourceName == GetCurrentResourceName() then
+        StartAllPlayersPlaytimeTracker()
+    end
+end)
 
 function hasAppliedForSocialMoney(identifier, cb)
     MySQL.Async.fetchScalar('SELECT COUNT(*) FROM k3_cityhall_social WHERE identifier = @identifier', {
@@ -367,42 +372,59 @@ end)
 --- PLAYTIME TRACKER & STATS
 
 local playerPlaytimes = {}
-local playerTimers = {}
+
+local function StartAllPlayersPlaytimeTracker()
+    local players = GetPlayers()
+
+    for _, playerId in ipairs(players) do
+        local xPlayer = ESX.GetPlayerFromId(playerId)
+        if xPlayer then
+            StartPlaytimeTracker(playerId, xPlayer.identifier)
+        end
+    end
+end
 
 function StartPlaytimeTracker(playerId, identifier)
     local xPlayer = ESX.GetPlayerFromId(playerId)
     if not xPlayer then return end
 
-    if not playerTimers[identifier] then
-        playerTimers[identifier] = true
+    -- Stop existing tracker if it's already running
+    if playerPlaytimes[identifier] then
+        playerPlaytimes[identifier].tracking = false
+        Wait(100) -- Small delay to ensure the tracking loop exits
+    end
 
-        MySQL.Async.fetchScalar('SELECT playtime FROM users WHERE identifier = @identifier', {
-            ['@identifier'] = identifier
-        }, function(playtime)
-            playerPlaytimes[identifier] = playtime or 0
+    MySQL.Async.fetchScalar('SELECT playtime FROM users WHERE identifier = @identifier', {
+        ['@identifier'] = identifier
+    }, function(playtime)
+        local tracking = true
+        local currentPlaytime = playtime or 0
 
-            CreateThread(function()
-                while playerTimers[identifier] do
-                    Wait(60000)
-                    playerPlaytimes[identifier] = playerPlaytimes[identifier] + 1
+        playerPlaytimes[identifier] = {
+            tracking = tracking,
+            playtime = currentPlaytime
+        }
 
-                    MySQL.Async.execute('UPDATE users SET playtime = @newPlaytime WHERE identifier = @identifier', {
-                        ['@newPlaytime'] = playerPlaytimes[identifier],
-                        ['@identifier'] = identifier
-                    })
-                end
-            end)
+        CreateThread(function()
+            while tracking do
+                Wait(60000)
+                currentPlaytime = currentPlaytime + 1
+
+                -- Update in-memory playtime
+                playerPlaytimes[identifier].playtime = currentPlaytime
+
+                MySQL.Async.execute('UPDATE users SET playtime = @newPlaytime WHERE identifier = @identifier', {
+                    ['@newPlaytime'] = currentPlaytime,
+                    ['@identifier'] = identifier
+                }, function(rowsChanged)
+                    if rowsChanged == 0 then
+                        print("Failed to update playtime for: " .. identifier)
+                    end
+                end)
+            end
         end)
-    end
+    end)
 end
-
-AddEventHandler('playerDropped', function(reason)
-    local playerId = source
-    local xPlayer = ESX.GetPlayerFromId(playerId)
-    if xPlayer then
-        playerTimers[xPlayer.identifier] = nil
-    end
-end)
 
 
 ESX.RegisterServerCallback('k3_cityhall:getPlayerStats', function(source, cb)
@@ -697,7 +719,7 @@ AddEventHandler('k3_cityhall:acceptMarriage', function(requesterId)
 
                         if Config.Marriage.notifyAll then
                             local msg = string.format(Config.Marriage.notifyAllmsg, xRequester.getName(), xPlayer.getName())
-                            serverNotify(-1, msg)
+                            serverNotify(-1, message)
                         end
                     else
                         serverNotify(xRequester.source, "There was an error processing the marriage. Please try again.")
