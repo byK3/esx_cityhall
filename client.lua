@@ -1,5 +1,6 @@
 local npc = nil
 local firstSpawn = false
+local cityhallBlip = nil
 
 AddEventHandler('playerSpawned', function()
     if not firstSpawn then
@@ -11,6 +12,8 @@ end)
 
 function startThread()
     spawnNPC()
+    createBlip()
+
     CreateThread(function()
         while true do
             local ped = PlayerPedId()
@@ -51,8 +54,6 @@ function startThread()
     end)
 end
 
-
-
 function spawnNPC()
     if Config.General.npc.enable then
         local model = GetHashKey(Config.General.npc.model)
@@ -60,10 +61,8 @@ function spawnNPC()
         while not HasModelLoaded(model) do
             Wait(1)
         end
-        print("[DEBUG] NPC model loaded!")
 
         npc = CreatePed(4, model, Config.General.npc.pos.x, Config.General.npc.pos.y, Config.General.npc.pos.z, Config.General.npc.heading, false, true)
-        print("[DEBUG] NPC created with entity ID: " .. npc)
         SetEntityAsMissionEntity(npc, true, true)
         SetBlockingOfNonTemporaryEvents(npc, true)
         FreezeEntityPosition(npc, true)
@@ -76,6 +75,18 @@ function spawnNPC()
     end
 end
 
+function createBlip()
+    if Config.General.blip.enable and not cityhallBlip then
+        cityhallBlip = AddBlipForCoord(Config.General.position.coords.x, Config.General.position.coords.y, Config.General.position.coords.z)
+        SetBlipSprite(cityhallBlip, Config.General.blip.sprite)
+        SetBlipColour(cityhallBlip, Config.General.blip.color)
+        SetBlipScale(cityhallBlip, Config.General.blip.scale)
+        SetBlipAsShortRange(cityhallBlip, true)
+        BeginTextCommandSetBlipName("STRING")
+        AddTextComponentString(Config.General.blip.name)
+        EndTextCommandSetBlipName(cityhallBlip)
+    end
+end
 
 local menuOpen = false
 
@@ -84,15 +95,24 @@ function OpenMenu()
     local distance = #(playerCoords - Config.General.position.coords)
 
     if distance < Config.General.position.interactionRadius then
+        local menuElements = {
+            {label = "Namechange Office", value = "namechange"},
+            {label = "Registry Office", value = "registryOffice"},
+            {label = "Stats", value = "stats"},
+        }
+
+        if Config.SocialMoney.enable then
+            table.insert(menuElements, 1, {label = "Social Menu Option", value = "socialmenu"})
+        end
+
+        if Config.Leaderboard.enable then
+            table.insert(menuElements, {label = "Leaderboard", value = "leaderboard"})
+        end
+
         ESX.UI.Menu.Open('default', GetCurrentResourceName(), "general", {
             title = "Cityhall",
             align = "top-left",
-            elements = {
-                {label = "Social Menu Option", value = "socialmenu"},
-                {label = "Namechange Office", value = "namechange"},
-                {label = "Registry Office", value = "registryOffice"},
-                {label = "Stats", value = "stats"},
-            }
+            elements = menuElements
         }, function(data, menu)
             if data.current.value == "socialmenu" then
                 menu.close()
@@ -106,7 +126,10 @@ function OpenMenu()
             elseif data.current.value == "registryOffice" then
                 menu.close()
                 OpenRegistryOfficeMenu()
-            end
+            elseif data.current.value == "leaderboard" then
+                menu.close()
+                OpenLeaderboardMenu()
+            end            
         end, function(data, menu)
             menu.close()
             menuOpen = false
@@ -127,6 +150,7 @@ function OpenMenu()
         end)
     end
 end
+
 
 
 -- SOCIAL MENU
@@ -273,7 +297,10 @@ function OpenStatsMenu()
                 {label = "Lastname: " .. stats.lastname},
                 {label = "Sex: " .. stats.sex},
                 {label = "DOB: " .. stats.dateofbirth},
+                {label = "Height: " .. stats.height .. " cm"},
+                {label = "Phone Number: " .. stats.phone_number},
                 {label = "Job: " .. stats.job},
+                {label = "Job Grade: " .. stats.job_grade},
                 {label = "Cash: $" .. stats.money},
                 {label = "Bank: $" .. stats.bank},
                 {label = "Black-Money: $" .. stats.black_money},
@@ -314,14 +341,6 @@ function OpenStatsMenu()
         end
     end)
 end
-
-AddEventHandler('baseevents:onPlayerDied', function(killerType, coords)
-    TriggerServerEvent('k3_cityhall:addDeath')
-end)
-
-AddEventHandler('baseevents:onPlayerKilled', function(killerId, data)
-    TriggerServerEvent('k3_cityhall:addKill')
-end)
 
 
 -- MARRIAGE
@@ -436,6 +455,138 @@ function OpenDivorceMenu()
                 menu.close()
             end
         end, function(data, menu)
+            menu.close()
+        end)
+    end)
+end
+
+
+--- Leaderboard
+
+
+function OpenLeaderboardMenu()
+    local leaderboardCategories = {
+        {label = "Richest Players", value = "richest"},
+        {label = "Most Playtime", value = "playtime"},
+        {label = "Most Kills", value = "kills"},
+        {label = "Most Deaths", value = "deaths"}
+    }
+
+    ESX.UI.Menu.Open('default', GetCurrentResourceName(), "leaderboard_categories", {
+        title = "Leaderboard Categories",
+        align = "top-left",
+        elements = leaderboardCategories
+    }, function(data, menu)
+        menu.close()
+
+        if data.current.value == "richest" then
+            OpenRichestPlayersLeaderboard()
+        elseif data.current.value == "playtime" then
+            OpenMostPlaytimeLeaderboard()
+        elseif data.current.value == "kills" then
+            OpenMostKillsLeaderboard()
+        elseif data.current.value == "deaths" then
+            OpenMostDeathsLeaderboard()
+        end
+
+    end, function(data, menu)
+        menu.close()
+    end)
+end
+
+
+function OpenRichestPlayersLeaderboard()
+    ESX.TriggerServerCallback('k3_cityhall:getTopRichest', function(players)
+        local leaderboardElements = {}
+
+        local sortBy = Config.Leaderboard.leaderboard.sortBy
+        local displayValue = "bank"
+
+        if sortBy == "money" then
+            displayValue = "money"
+        elseif sortBy == "black_money" then
+            displayValue = "black_money"
+        end
+
+        for i=1, math.min(#players, Config.Leaderboard.leaderboard.limit) do
+            local player = players[i]
+            local firstname = player.firstname or "Unknown"
+            local lastname = player.lastname or "Unknown"
+            local value = player[displayValue] or 0
+            table.insert(leaderboardElements, {label = i .. ". " .. firstname .. " " .. lastname .. " - $" .. value})
+        end
+
+        ESX.UI.Menu.Open('default', GetCurrentResourceName(), "richest_players", {
+            title = "Top " .. Config.Leaderboard.leaderboard.limit .. " Richest Players",
+            align = "top-left",
+            elements = leaderboardElements
+        }, nil, function(data, menu)
+            menu.close()
+        end)
+    end)
+end
+
+function OpenMostPlaytimeLeaderboard()
+    ESX.TriggerServerCallback('k3_cityhall:getTopPlaytime', function(players)
+        local leaderboardElements = {}
+
+        for i=1, math.min(#players, Config.Leaderboard.leaderboard.limit) do
+            local player = players[i]
+            local firstname = player.firstname or "Unknown"
+            local lastname = player.lastname or "Unknown"
+            local playtime = player.playtime or 0
+            table.insert(leaderboardElements, {label = i .. ". " .. firstname .. " " .. lastname .. " - " .. playtime .. " minutes"})
+        end
+
+        ESX.UI.Menu.Open('default', GetCurrentResourceName(), "most_playtime", {
+            title = "Top " .. Config.Leaderboard.leaderboard.limit .. " Most Playtime",
+            align = "top-left",
+            elements = leaderboardElements
+        }, nil, function(data, menu)
+            menu.close()
+        end)
+    end)
+end
+
+function OpenMostKillsLeaderboard()
+    ESX.TriggerServerCallback('k3_cityhall:getTopKills', function(players)
+        local leaderboardElements = {}
+
+        for i=1, math.min(#players, Config.Leaderboard.leaderboard.limit) do
+            local player = players[i]
+            local firstname = player.firstname or "Unknown"
+            local lastname = player.lastname or "Unknown"
+            local kills = player.kills or 0
+            table.insert(leaderboardElements, {label = i .. ". " .. firstname .. " " .. lastname .. " - " .. kills .. " kills"})
+        end
+
+        ESX.UI.Menu.Open('default', GetCurrentResourceName(), "most_kills", {
+            title = "Top " .. Config.Leaderboard.leaderboard.limit .. " Most Kills",
+            align = "top-left",
+            elements = leaderboardElements
+        }, nil, function(data, menu)
+            menu.close()
+        end)
+    end)
+end
+
+function OpenMostDeathsLeaderboard()
+    ESX.TriggerServerCallback('k3_cityhall:getTopDeaths', function(players)
+        local leaderboardElements = {}
+
+        for i=1, math.min(#players, Config.Leaderboard.leaderboard.limit) do
+            local player = players[i]
+            local firstname = player.firstname or "Unknown"
+            local lastname = player.lastname or "Unknown"
+            local deaths = player.deaths or 0
+            table.insert(leaderboardElements, {label = i .. ". " .. firstname .. " " .. lastname .. " - " .. deaths .. " deaths"})
+        end
+
+        ESX.UI.Menu.Open('default', GetCurrentResourceName(), "most_deaths", {
+            title = "Top " .. Config.Leaderboard.leaderboard.limit .. " Most Deaths",
+            align = "top-left",
+            elements = leaderboardElements
+        }, nil, function(data, menu)
             menu.close()
         end)
     end)
