@@ -15,6 +15,14 @@ Config.General = {
             color = vector3(0, 0, 255),  -- RGB SYSTEM (0-255)
             alpha = 255, -- Opacity
         },
+    }, 
+
+    blip = {
+        enable = true, -- If false, the blip will be disabled
+        sprite = 419, -- Blip sprite (https://docs.fivem.net/docs/game-references/blips/)
+        color = 0, -- Blip color
+        scale = 0.8, -- Blip scale
+        name = "Cityhall", -- Blip name
     },
 
     npc = {
@@ -83,6 +91,16 @@ Config.Marriage = {
 
 }
 
+Config.Leaderboard = {
+
+    enable = true, -- If false, the leaderboard will be disabled
+
+    leaderboard = {
+        limit = 5, -- The amount of players shown in the leaderboard
+        sortBy = "bank", -- The value to sort by (bank, money, black_money) || Just for "Richest Players"
+    },
+
+}
 
 -- Change trigger events to your own framework or script
 
