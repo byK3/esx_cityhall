@@ -19,7 +19,7 @@ function InitializeDatabase()
         ADD IF NOT EXISTS deaths INT NOT NULL DEFAULT 0,
         ADD IF NOT EXISTS kd_ratio FLOAT(5,2) NOT NULL DEFAULT 0.00;
     ]], {}, function(rowsChanged)
-        print("[CITYHALL] - 'playtime', 'kills', 'deaths', and 'kd_ratio' columns added to 'users' table")
+        print("[CITYHALL] - 'users' table initialized")
     end)
     
     MySQL.Async.execute([[
@@ -33,6 +33,8 @@ function InitializeDatabase()
     ]], {}, function(rowsChanged)
         print("[CITYHALL] - 'k3_cityhall_marriage' table initialized")
     end)
+
+    print ("[CITYHALL] - All tables initialized - Ready to go!")
 end
 
 
@@ -44,12 +46,13 @@ end)
 AddEventHandler('esx:playerLoaded', function(playerId, xPlayer)
     local identifier = xPlayer.identifier
 
-    -- Social Money Check
-    IsPlayerEligibleForSocialMoney(playerId, function(isEligible)
-        if isEligible then
-            StartSocialMoneyTimer(playerId)
-        end
-    end)
+    if Config.SocialMoney.enable then
+        IsPlayerEligibleForSocialMoney(playerId, function(isEligible)
+            if isEligible then
+                StartSocialMoneyTimer(playerId)
+            end
+        end)
+    end
 
     StartPlaytimeTracker(playerId, xPlayer.identifier)
 end)
@@ -103,7 +106,7 @@ AddEventHandler('esx:setJob', function(playerId, job, lastJob)
     if not isJobAllowed(job.name, Config.SocialMoney.allowedJobs) then
         removeRecipientFromDatabase(identifier, function(removed)
             if removed then
-                TriggerClientEvent('esx:showNotification', playerId, "You are no longer eligible for social money.")
+                serverNotify (xPlayer.source, "You are no longer eligible for social money!")
             else
                 print ("[CITYHALL] - Error removing player from database || Name: " .. xPlayer.name .. " || Identifier: " .. identifier .. " || New Job: " .. job.name .. " || Last Job: " .. lastJob.name)
             end
@@ -406,7 +409,7 @@ ESX.RegisterServerCallback('k3_cityhall:getPlayerStats', function(source, cb)
     local xPlayer = ESX.GetPlayerFromId(source)
     local identifier = xPlayer.identifier
 
-    MySQL.Async.fetchAll('SELECT firstname, lastname, sex, dateofbirth, playtime, kills, deaths, kd_ratio FROM users WHERE identifier = @identifier', {
+    MySQL.Async.fetchAll('SELECT firstname, lastname, sex, dateofbirth, playtime, kills, deaths, kd_ratio, phone_number, height FROM users WHERE identifier = @identifier', {
         ['@identifier'] = identifier
     }, function(result)
         if result[1] then
@@ -416,7 +419,10 @@ ESX.RegisterServerCallback('k3_cityhall:getPlayerStats', function(source, cb)
                 lastname = data.lastname,
                 sex = data.sex,
                 dateofbirth = data.dateofbirth,
+                height = data.height,
+                phone_number = data.phone_number,
                 job = xPlayer.job.name,
+                job_grade = xPlayer.job.grade_label,
                 money = xPlayer.getMoney(),
                 bank = xPlayer.getAccount('bank').money,
                 black_money = xPlayer.getAccount('black_money').money,
@@ -424,8 +430,9 @@ ESX.RegisterServerCallback('k3_cityhall:getPlayerStats', function(source, cb)
                 playtime = data.playtime,
                 kills = data.kills,
                 deaths = data.deaths,
-                kd_ratio = data.kd_ratio
+                kd_ratio = data.kd_ratio,
             }
+            
 
             
             -- Get the number of owned vehicles
@@ -465,6 +472,25 @@ ESX.RegisterServerCallback('k3_cityhall:getPlayerStats', function(source, cb)
         end
     end)
 end)
+
+RegisterServerEvent('esx:onPlayerDeath')
+AddEventHandler('esx:onPlayerDeath', function(data)
+    local victim = ESX.GetPlayerFromId(source)
+
+    if victim then
+        AddDeathForPlayer(victim.identifier)
+        UpdateKDForPlayer(victim.identifier)
+    end
+
+    if data.killedByPlayer then
+        local killer = ESX.GetPlayerFromId(data.killerServerId)
+        if killer then
+            AddKillForPlayer(killer.identifier)
+            UpdateKDForPlayer(killer.identifier)
+        end
+    end
+end)
+
 
 function AddKillForPlayer(identifier)
     MySQL.Async.execute('UPDATE users SET kills = kills + 1 WHERE identifier = @identifier', {
@@ -775,3 +801,63 @@ AddEventHandler('k3_cityhall:getMarriageInfo', function()
     end)
 end)
 
+
+-- LEADERBOARD
+
+ESX.RegisterServerCallback('k3_cityhall:getTopRichest', function(source, cb)
+    if Config.Leaderboard.enable then
+        local limit = Config.Leaderboard.leaderboard.limit
+        local sortBy = Config.Leaderboard.leaderboard.sortBy
+
+        if sortBy == "bank" then
+            MySQL.Async.fetchAll('SELECT firstname, lastname, JSON_UNQUOTE(JSON_EXTRACT(accounts, "$.bank")) AS bank FROM users ORDER BY CAST(JSON_UNQUOTE(JSON_EXTRACT(accounts, "$.bank")) AS UNSIGNED) DESC LIMIT @limit', {
+                ['@limit'] = limit
+            }, function(result)
+                cb(result)
+            end)
+        elseif sortBy == "money" then
+            MySQL.Async.fetchAll('SELECT firstname, lastname, JSON_UNQUOTE(JSON_EXTRACT(accounts, "$.money")) AS money FROM users ORDER BY CAST(JSON_UNQUOTE(JSON_EXTRACT(accounts, "$.money")) AS UNSIGNED) DESC LIMIT @limit', {
+                ['@limit'] = limit
+            }, function(result)
+                cb(result)
+            end)
+        elseif sortBy == "black_money" then
+            MySQL.Async.fetchAll('SELECT firstname, lastname, JSON_UNQUOTE(JSON_EXTRACT(accounts, "$.black_money")) AS black_money FROM users ORDER BY CAST(JSON_UNQUOTE(JSON_EXTRACT(accounts, "$.black_money")) AS UNSIGNED) DESC LIMIT @limit', {
+                ['@limit'] = limit
+            }, function(result)
+                cb(result)
+            end)
+        else
+            cb(nil)
+        end
+    else
+        cb(nil)
+    end
+end)
+
+ESX.RegisterServerCallback('k3_cityhall:getTopPlaytime', function(source, cb)
+    local limit = Config.Leaderboard.leaderboard.limit
+    MySQL.Async.fetchAll('SELECT firstname, lastname, playtime FROM users ORDER BY playtime DESC LIMIT @limit', {
+        ['@limit'] = limit
+    }, function(results)
+        cb(results)
+    end)
+end)
+
+ESX.RegisterServerCallback('k3_cityhall:getTopKills', function(source, cb)
+    local limit = Config.Leaderboard.leaderboard.limit
+    MySQL.Async.fetchAll('SELECT firstname, lastname, kills FROM users ORDER BY kills DESC LIMIT @limit', {
+        ['@limit'] = limit
+    }, function(results)
+        cb(results)
+    end)
+end)
+
+ESX.RegisterServerCallback('k3_cityhall:getTopDeaths', function(source, cb)
+    local limit = Config.Leaderboard.leaderboard.limit
+    MySQL.Async.fetchAll('SELECT firstname, lastname, deaths FROM users ORDER BY deaths DESC LIMIT @limit', {
+        ['@limit'] = limit
+    }, function(results)
+        cb(results)
+    end)
+end)
