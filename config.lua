@@ -102,6 +102,35 @@ Config.Leaderboard = {
 
 }
 
+Config.PlaytimeRewards = {
+    enable = true, -- If false, the rewards will be disabled
+
+    rewards = {
+        {playtime = 1, type = 'money', subtype = 'cash', value = 500}, 
+        {playtime = 3, type = 'money', subtype = 'bank', value = 1000},
+        {playtime = 5, type = 'money', subtype = 'black_money', value = 1000}, 
+        {playtime = 9, type = 'weapon', value = 'WEAPON_PISTOL', count = 1, ammo = 48},
+        {playtime = 12, type = 'item', value = 'bread', count = 1},
+    },
+}
+
+Config.Stats = {
+
+    enable = true, -- If false, the stats will be disabled
+
+    -- If you dont know what you are doing, dont change anything below this line (vehicles is standard esx table)
+    vehicles = {
+        tableName = 'owned_vehicles', -- The name of the table in the database
+        ownerColumn = 'owner', -- The name of the owner column in the database
+    },
+
+    house = {
+        tableName = 'houses', -- The name of the table in the database
+        ownerColumn = 'owner', -- The name of the owner column in the database
+    }
+}
+
+
 -- Change trigger events to your own framework or script
 
 function clientNotify(message)
