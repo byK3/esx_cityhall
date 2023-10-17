@@ -98,11 +98,14 @@ function OpenMenu()
         local menuElements = {
             {label = "Namechange Office", value = "namechange"},
             {label = "Registry Office", value = "registryOffice"},
-            {label = "Stats", value = "stats"},
         }
 
         if Config.SocialMoney.enable then
             table.insert(menuElements, 1, {label = "Social Menu Option", value = "socialmenu"})
+        end
+
+        if Config.Stats.enable then
+            table.insert(menuElements, {label = "Stats", value = "stats"})
         end
 
         if Config.Leaderboard.enable then
@@ -311,6 +314,7 @@ function OpenStatsMenu()
                 {label = "Deaths: " .. stats.deaths},
                 {label = "KD: " .. stats.kd_ratio},
                 {label = "Vehicles: " .. stats.vehicles},
+                {label = "Houses: " .. stats.houses},
             }
 
             ESX.UI.Menu.Open('default', GetCurrentResourceName(), "stats_menu", {
