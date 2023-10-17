@@ -34,13 +34,32 @@ function InitializeDatabase()
         print("[CITYHALL] - 'k3_cityhall_marriage' table initialized")
     end)
 
+    MySQL.Async.execute([[
+        CREATE TABLE IF NOT EXISTS `k3_playtime_rewards` (
+            `id` INT NOT NULL AUTO_INCREMENT,
+            `identifier` VARCHAR(255) NOT NULL,
+            `playtime_rewarded` INT NOT NULL,
+            `reward_date` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`)
+        );
+    ]], {}, function(rowsChanged)
+        print("[CITYHALL] - 'k3_playtime_rewards' table initialized")
+    end)
+
     print ("[CITYHALL] - All tables initialized - Ready to go!")
 end
 
 
 
+
 CreateThread(function()
     InitializeDatabase()
+end)
+
+AddEventHandler('onResourceStart', function(resourceName) --if the script restarts for some reason it should start the timer again
+    if resourceName == GetCurrentResourceName() then
+        StartAllPlayersPlaytimeTracker()
+    end
 end)
 
 AddEventHandler('esx:playerLoaded', function(playerId, xPlayer)
@@ -54,7 +73,7 @@ AddEventHandler('esx:playerLoaded', function(playerId, xPlayer)
         end)
     end
 
-    StartPlaytimeTracker(playerId, xPlayer.identifier)
+    StartPlaytimeTracker(playerId, identifier)
 end)
 
 
@@ -179,16 +198,16 @@ AddEventHandler('k3_cityhall:collectStoredSocialMoney', function()
     local identifier = xPlayer.identifier
 
     if Config.SocialMoney.money.automaticMode then
-        serverNotify(source, string.format("The social money is automatically collected every ~g~%s~s~ minutes.", Config.SocialMoney.money.paymentSchedule))
+        serverNotify(xPlayer.source, string.format("The social money is automatically collected every ~g~%s~s~ minutes.", Config.SocialMoney.money.paymentSchedule))
     else
         if pendingSocialMoney[identifier] and pendingSocialMoney[identifier] > 0 then
             local amount = pendingSocialMoney[identifier]
             xPlayer.addMoney(amount)
             pendingSocialMoney[identifier] = nil
 
-            serverNotify(source, string.format("You collected ~g~$%s~s~ from your social money.", amount))
+            serverNotify(xPlayer.source, string.format("You collected ~g~$%s~s~ from your social money.", amount))
         else
-            serverNotify(source, "You don't have any pending social money.")
+            serverNotify(xPlayer.source, "You don't have any pending social money.")
         end
     end
 end)
@@ -270,8 +289,6 @@ function getRemainingTimeFromDatabase(identifier)
     return getRemainingTimeForPlayer(identifier)
 end
 
-
-
 RegisterServerEvent('k3_cityhall:getRemainingTime')
 AddEventHandler('k3_cityhall:getRemainingTime', function()
     local xPlayer = ESX.GetPlayerFromId(source)
@@ -279,7 +296,7 @@ AddEventHandler('k3_cityhall:getRemainingTime', function()
 
     local remainingTime = getRemainingTimeFromDatabase(identifier) 
 
-    TriggerClientEvent('k3_cityhall:receiveRemainingTime', source, remainingTime)
+    TriggerClientEvent('k3_cityhall:receiveRemainingTime', xPlayer.source, remainingTime)
 end)
 
 
@@ -305,45 +322,28 @@ ESX.RegisterServerCallback('k3_cityhall:getCurrentName', function(source, cb)
     end)
 end)
 
-ESX.RegisterServerCallback('k3_cityhall:canChangeName', function(source, cb)
-    local xPlayer = ESX.GetPlayerFromId(source)
-
-    if Config.Namechange.item.needItem then
-        local hasItem = xPlayer.getInventoryItem(Config.Namechange.item.itemName).count > 0
-        cb(hasItem)
-    else
-        local playerMoney = xPlayer.getMoney()
-        if playerMoney >= Config.Namechange.price then
-            xPlayer.removeMoney(Config.Namechange.price)
-            cb(true)
-        else
-            cb(false)
-        end
-    end
-end)
-
-
 RegisterServerEvent('k3_cityhall:changeName')
 AddEventHandler('k3_cityhall:changeName', function(newFirstName, newLastName)
     local xPlayer = ESX.GetPlayerFromId(source)
     local identifier = xPlayer.identifier
+    local playerMoney = xPlayer.getMoney()
+
+    if playerMoney < Config.Namechange.price then
+        serverNotify(xPlayer.source, "You don't have enough money!")
+        return
+    end
 
     if Config.Namechange.item.needItem then
         local hasItem = xPlayer.getInventoryItem(Config.Namechange.item.itemName).count > 0
         local itemLabel = Config.Namechange.item.itemLabel
         if not hasItem then
-            serverNotify(source, "You also need item: " .. itemLabel)
+            serverNotify(xPlayer.source, "You also need item: " .. itemLabel)
             return
         end
         xPlayer.removeInventoryItem(Config.Namechange.item.itemName, 1)
-    else
-        local playerMoney = xPlayer.getMoney()
-        if playerMoney < Config.Namechange.price then
-            serverNotify(source, "You don't have enough money!")
-            return
-        end
-        xPlayer.removeMoney(Config.Namechange.price)
     end
+
+    xPlayer.removeMoney(Config.Namechange.price)
 
     if newFirstName then
         MySQL.Async.execute('UPDATE users SET firstname = @firstname WHERE identifier = @identifier', {
@@ -359,51 +359,127 @@ AddEventHandler('k3_cityhall:changeName', function(newFirstName, newLastName)
         })
     end
 
-    serverNotify(source, "You have successfully changed your name. You are now: " .. newFirstName .. " " .. newLastName)
+    serverNotify(xPlayer.source, "You have successfully changed your name. You are now: " .. newFirstName .. " " .. newLastName)
 end)
 
 
 
---- PLAYTIME TRACKER & STATS
+
+--- PLAYTIME TRACKER & REWARDS
 
 local playerPlaytimes = {}
-local playerTimers = {}
 
 function StartPlaytimeTracker(playerId, identifier)
     local xPlayer = ESX.GetPlayerFromId(playerId)
     if not xPlayer then return end
 
-    if not playerTimers[identifier] then
-        playerTimers[identifier] = true
+    if playerPlaytimes[identifier] then
+        playerPlaytimes[identifier].tracking = false
+        Wait(100) -- Small delay to ensure the tracking loop exits
+    end
 
-        MySQL.Async.fetchScalar('SELECT playtime FROM users WHERE identifier = @identifier', {
-            ['@identifier'] = identifier
-        }, function(playtime)
-            playerPlaytimes[identifier] = playtime or 0
+    MySQL.Async.fetchScalar('SELECT playtime FROM users WHERE identifier = @identifier', {
+        ['@identifier'] = identifier
+    }, function(playtime)
+        local tracking = true
+        local currentPlaytime = playtime or 0
 
-            CreateThread(function()
-                while playerTimers[identifier] do
-                    Wait(60000)
-                    playerPlaytimes[identifier] = playerPlaytimes[identifier] + 1
+        playerPlaytimes[identifier] = {
+            tracking = tracking,
+            playtime = currentPlaytime
+        }
 
-                    MySQL.Async.execute('UPDATE users SET playtime = @newPlaytime WHERE identifier = @identifier', {
-                        ['@newPlaytime'] = playerPlaytimes[identifier],
-                        ['@identifier'] = identifier
-                    })
-                end
-            end)
+        CreateThread(function()
+            while tracking do
+                Wait(60000)
+                currentPlaytime = currentPlaytime + 1
+
+                -- Update in-memory playtime
+                playerPlaytimes[identifier].playtime = currentPlaytime
+
+                MySQL.Async.execute('UPDATE users SET playtime = @newPlaytime WHERE identifier = @identifier', {
+                    ['@newPlaytime'] = currentPlaytime,
+                    ['@identifier'] = identifier
+                }, function(rowsChanged)
+                    if rowsChanged == 0 then
+                        print("Failed to update playtime for: " .. identifier)
+                    end
+                end)
+            end
         end)
+    end)
+end
+
+function StartAllPlayersPlaytimeTracker()
+    local players = ESX.GetExtendedPlayers()
+
+    for _, player in ipairs(players) do
+        local xPlayer = ESX.GetPlayerFromId(player.source)
+        local identifier = xPlayer.identifier
+        StartPlaytimeTracker(player.source, identifier)
     end
 end
 
 AddEventHandler('playerDropped', function(reason)
     local playerId = source
     local xPlayer = ESX.GetPlayerFromId(playerId)
-    if xPlayer then
-        playerTimers[xPlayer.identifier] = nil
+    
+    if xPlayer and playerPlaytimes[xPlayer.identifier] then
+        playerPlaytimes[xPlayer.identifier].tracking = false
     end
 end)
 
+function CheckAndGiveRewards(playerId, identifier)
+    local xPlayer = ESX.GetPlayerFromId(playerId)
+    local playtimeMinutes = playerPlaytimes[identifier] or 0
+
+    if not xPlayer then return end
+
+    local rewardedHoursSet = {}
+
+    MySQL.Async.fetchAll('SELECT playtime_rewarded FROM k3_playtime_rewards WHERE identifier = @identifier', {
+        ['@identifier'] = identifier
+    }, function(rewardedPlaytimes)
+        for _, row in ipairs(rewardedPlaytimes) do
+            rewardedHoursSet[row.playtime_rewarded] = true
+        end
+
+        for _, reward in ipairs(Config.PlaytimeRewards.rewards) do
+            if playtimeMinutes >= reward.playtime and not rewardedHoursSet[reward.playtime] then
+                if reward.type == 'money' then
+                    if reward.subtype == 'cash' then
+                        xPlayer.addMoney(reward.value)
+                        serverNotify(xPlayer.source, "You got rewarded for: " .. reward.playtime .. " minutes. You got: $ " .. reward.value .. " cash")
+                    elseif reward.subtype == 'bank' then
+                        xPlayer.addAccountMoney('bank', reward.value)
+                        serverNotify(xPlayer.source, "You got rewarded for: " .. reward.playtime .. " minutes. You got: $ " .. reward.value .. " bank")
+                    elseif reward.subtype == 'black_money' then
+                        xPlayer.addAccountMoney('black_money', reward.value)
+                        serverNotify(xPlayer.source, "You got rewarded for: " .. reward.playtime .. " minutes. You got: $ " .. reward.value .. " black money")
+                    end
+                elseif reward.type == 'item' then
+                    xPlayer.addInventoryItem(reward.value, reward.count)
+                    serverNotify(xPlayer.source, "You got rewarded for: " .. reward.playtime .. " minutes. You got: " .. reward.count .. "x " .. reward.value)
+                elseif reward.type == 'weapon' then
+                    xPlayer.addWeapon(reward.value, reward.ammo)
+                    serverNotify(xPlayer.source, "You got rewarded for: " .. reward.playtime .. " minutes. You got: " .. reward.value .. " with " .. reward.ammo .. " ammo")
+                end
+
+                MySQL.Async.execute('INSERT INTO k3_playtime_rewards (identifier, playtime_rewarded) VALUES (@identifier, @playtime)', {
+                    ['@identifier'] = identifier,
+                    ['@playtime'] = reward.playtime
+                })
+            end
+        end
+    end)
+end
+
+
+
+
+
+
+-- STATS
 
 ESX.RegisterServerCallback('k3_cityhall:getPlayerStats', function(source, cb)
     local xPlayer = ESX.GetPlayerFromId(source)
@@ -432,39 +508,18 @@ ESX.RegisterServerCallback('k3_cityhall:getPlayerStats', function(source, cb)
                 deaths = data.deaths,
                 kd_ratio = data.kd_ratio,
             }
-            
 
-            
-            -- Get the number of owned vehicles
-            MySQL.Async.fetchScalar('SELECT COUNT(*) FROM owned_vehicles WHERE owner = @identifier', {
-                ['@identifier'] = identifier
-            }, function(vehicleCount)
+            checkVehicleOwnership(identifier, function(vehicleCount)
                 stats.vehicles = vehicleCount
 
-                -- Check marriage status
-                MySQL.Async.fetchAll('SELECT player1, player2 FROM k3_cityhall_marriage WHERE player1 = @identifier OR player2 = @identifier', {
-                    ['@identifier'] = identifier
-                }, function(result)
-                    if result[1] then
-                        local spouseIdentifier
-                        if result[1].player1 == identifier then
-                            spouseIdentifier = result[1].player2
-                        else
-                            spouseIdentifier = result[1].player1
-                        end
+                checkHouseOwnership(identifier, function(houseCount)
+                    stats.houses = houseCount
 
-                        MySQL.Async.fetchScalar('SELECT CONCAT(firstname, " ", lastname) as fullname FROM users WHERE identifier = @spouseIdentifier', {
-                            ['@spouseIdentifier'] = spouseIdentifier
-                        }, function(spouseName)
-                            stats.isMarried = true
-                            stats.spouse = spouseName
-                            cb(stats)
-                        end)
-                    else
-                        stats.isMarried = false
-                        stats.spouse = "Not married"
+                    checkMarriageStatus(identifier, function(isMarried, spouseName)
+                        stats.isMarried = isMarried
+                        stats.spouse = spouseName or "Not married"
                         cb(stats)
-                    end
+                    end)
                 end)
             end)
         else
@@ -472,6 +527,40 @@ ESX.RegisterServerCallback('k3_cityhall:getPlayerStats', function(source, cb)
         end
     end)
 end)
+
+function checkVehicleOwnership(identifier, cb)
+    MySQL.Async.fetchScalar('SELECT COUNT(*) FROM ' .. Config.Stats.vehicles.tableName .. ' WHERE ' .. Config.Stats.vehicles.ownerColumn .. ' = @identifier', {
+        ['@identifier'] = identifier
+    }, function(vehicleCount)
+        cb(vehicleCount)
+    end)
+end
+
+function checkHouseOwnership(identifier, cb)
+    MySQL.Async.fetchScalar('SELECT COUNT(*) FROM ' .. Config.Stats.house.tableName .. ' WHERE ' .. Config.Stats.house.ownerColumn .. ' = @identifier', {
+        ['@identifier'] = identifier
+    }, function(houseCount)
+        cb(houseCount)
+    end)
+end
+
+function checkMarriageStatus(identifier, cb)
+    MySQL.Async.fetchAll('SELECT player1, player2 FROM k3_cityhall_marriage WHERE player1 = @identifier OR player2 = @identifier', {
+        ['@identifier'] = identifier
+    }, function(result)
+        if result[1] then
+            local spouseIdentifier = (result[1].player1 == identifier) and result[1].player2 or result[1].player1
+            MySQL.Async.fetchScalar('SELECT CONCAT(firstname, " ", lastname) as fullname FROM users WHERE identifier = @spouseIdentifier', {
+                ['@spouseIdentifier'] = spouseIdentifier
+            }, function(spouseName)
+                cb(true, spouseName)
+            end)
+        else
+            cb(false)
+        end
+    end)
+end
+
 
 RegisterServerEvent('esx:onPlayerDeath')
 AddEventHandler('esx:onPlayerDeath', function(data)
@@ -696,8 +785,8 @@ AddEventHandler('k3_cityhall:acceptMarriage', function(requesterId)
                         serverNotify(xPlayer.source, "Congratulations! You are now married to " .. xRequester.getName() .. ".")
 
                         if Config.Marriage.notifyAll then
-                            local msg = string.format(Config.Marriage.notifyAllmsg, xRequester.getName(), xPlayer.getName())
-                            serverNotify(-1, msg)
+                            local message = string.format(Config.Marriage.notifyAllmsg, xRequester.getName(), xPlayer.getName())
+                            serverNotify(-1, message)
                         end
                     else
                         serverNotify(xRequester.source, "There was an error processing the marriage. Please try again.")
