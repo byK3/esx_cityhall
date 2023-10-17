@@ -405,6 +405,10 @@ function StartPlaytimeTracker(playerId, identifier)
                         print("Failed to update playtime for: " .. identifier)
                     end
                 end)
+                
+                if Config.PlaytimeRewards.enable then
+                    CheckAndGiveRewards(xPlayer.source, identifier)
+                end
             end
         end)
     end)
