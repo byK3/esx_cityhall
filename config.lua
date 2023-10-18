@@ -125,7 +125,7 @@ Config.Stats = {
     },
 
     house = {
-        tableName = 'houses', -- The name of the table in the database
+        tableName = 'owned_properties', -- The name of the table in the database
         ownerColumn = 'owner', -- The name of the owner column in the database
     }
 }
