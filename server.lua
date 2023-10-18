@@ -1,56 +1,54 @@
 -- DATABASE STUFF & FUNCTIONS
 function InitializeDatabase()
-    MySQL.Async.execute([[
-        CREATE TABLE IF NOT EXISTS `k3_cityhall_social` (
-            `id` INT NOT NULL AUTO_INCREMENT,
-            `identifier` VARCHAR(255) NOT NULL,
-            `applied_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (`id`),
-            UNIQUE KEY `identifier` (`identifier`)
-        );
-    ]], {}, function(rowsChanged)
-        print("[CITYHALL] - Database initialized")
-    end)
+    local queries = {
+        [[
+            CREATE TABLE IF NOT EXISTS `k3_cityhall_social` (
+                `id` INT NOT NULL AUTO_INCREMENT,
+                `identifier` VARCHAR(255) NOT NULL,
+                `applied_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                UNIQUE KEY `identifier` (`identifier`)
+            );
+        ]],
+        [[
+            ALTER TABLE users 
+            ADD IF NOT EXISTS playtime INT NOT NULL DEFAULT 0,
+            ADD IF NOT EXISTS kills INT NOT NULL DEFAULT 0,
+            ADD IF NOT EXISTS deaths INT NOT NULL DEFAULT 0,
+            ADD IF NOT EXISTS kd_ratio FLOAT(5,2) NOT NULL DEFAULT 0.00;
+        ]],
+        [[
+            CREATE TABLE IF NOT EXISTS `k3_cityhall_marriage` (
+                `id` INT NOT NULL AUTO_INCREMENT,
+                `player1` VARCHAR(255) NOT NULL,
+                `player2` VARCHAR(255) NOT NULL,
+                `married_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`)
+            );
+        ]],
+        [[
+            CREATE TABLE IF NOT EXISTS `k3_playtime_rewards` (
+                `id` INT NOT NULL AUTO_INCREMENT,
+                `identifier` VARCHAR(255) NOT NULL,
+                `playtime_rewarded` INT NOT NULL,
+                `reward_date` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`)
+            );
+        ]]
+    }
 
-    MySQL.Async.execute([[
-        ALTER TABLE users 
-        ADD IF NOT EXISTS playtime INT NOT NULL DEFAULT 0,
-        ADD IF NOT EXISTS kills INT NOT NULL DEFAULT 0,
-        ADD IF NOT EXISTS deaths INT NOT NULL DEFAULT 0,
-        ADD IF NOT EXISTS kd_ratio FLOAT(5,2) NOT NULL DEFAULT 0.00;
-    ]], {}, function(rowsChanged)
-        print("[CITYHALL] - 'users' table initialized")
-    end)
-    
-    MySQL.Async.execute([[
-        CREATE TABLE IF NOT EXISTS `k3_cityhall_marriage` (
-            `id` INT NOT NULL AUTO_INCREMENT,
-            `player1` VARCHAR(255) NOT NULL,
-            `player2` VARCHAR(255) NOT NULL,
-            `married_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (`id`)
-        );
-    ]], {}, function(rowsChanged)
-        print("[CITYHALL] - 'k3_cityhall_marriage' table initialized")
-    end)
+    for _, query in ipairs(queries) do
+        MySQL.Async.execute(query, {}, function(rowsChanged, error)
+            if error then
+                print("[CITYHALL] - Database initialization error: ", error)
+            else
+                print("[CITYHALL] - Executed query successfully")
+            end
+        end)
+    end
 
-    MySQL.Async.execute([[
-        CREATE TABLE IF NOT EXISTS `k3_playtime_rewards` (
-            `id` INT NOT NULL AUTO_INCREMENT,
-            `identifier` VARCHAR(255) NOT NULL,
-            `playtime_rewarded` INT NOT NULL,
-            `reward_date` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (`id`)
-        );
-    ]], {}, function(rowsChanged)
-        print("[CITYHALL] - 'k3_playtime_rewards' table initialized")
-    end)
-
-    print ("[CITYHALL] - All tables initialized - Ready to go!")
+    print("[CITYHALL] - All tables initialized - Ready to go!")
 end
-
-
-
 
 CreateThread(function()
     InitializeDatabase()
@@ -64,7 +62,6 @@ end)
 
 AddEventHandler('esx:playerLoaded', function(playerId, xPlayer)
     local identifier = xPlayer.identifier
-
     if Config.SocialMoney.enable then
         IsPlayerEligibleForSocialMoney(playerId, function(isEligible)
             if isEligible then
@@ -76,15 +73,14 @@ AddEventHandler('esx:playerLoaded', function(playerId, xPlayer)
     StartPlaytimeTracker(playerId, identifier)
 end)
 
-
+-- Optimized to use EXISTS for better performance
 function hasAppliedForSocialMoney(identifier, cb)
-    MySQL.Async.fetchScalar('SELECT COUNT(*) FROM k3_cityhall_social WHERE identifier = @identifier', {
+    MySQL.Async.fetchScalar('SELECT EXISTS(SELECT 1 FROM k3_cityhall_social WHERE identifier = @identifier)', {
         ['@identifier'] = identifier
-    }, function(count)
-        cb(count > 0)
+    }, function(exists)
+        cb(exists == 1)
     end)
 end
-
 
 function addRecipientToDatabase(identifier)
     MySQL.Async.execute('INSERT INTO k3_cityhall_social (identifier) VALUES (@identifier)', {
@@ -96,25 +92,14 @@ function removeRecipientFromDatabase(identifier, callback)
     MySQL.Async.execute('DELETE FROM k3_cityhall_social WHERE identifier = @identifier', {
         ['@identifier'] = identifier
     }, function(rowsChanged)
-        if rowsChanged > 0 then
-            callback(true)
-        else
-            callback(false)
-        end
+        callback(rowsChanged > 0)
     end)
 end
 
-
+-- Simplified with native Lua functions
 function isJobAllowed(job)
-    for _, allowedJob in ipairs(Config.SocialMoney.allowedJobs) do
-        if job == allowedJob then
-            return true
-        end
-    end
-    return false
+    return table.HasValue(Config.SocialMoney.allowedJobs, job)
 end
-
-
 
 -- SOCIAL MONEY FUNC / CHECKS
 
@@ -122,12 +107,12 @@ AddEventHandler('esx:setJob', function(playerId, job, lastJob)
     local xPlayer = ESX.GetPlayerFromId(playerId)
     local identifier = xPlayer.identifier
 
-    if not isJobAllowed(job.name, Config.SocialMoney.allowedJobs) then
+    if not isJobAllowed(job.name) then
         removeRecipientFromDatabase(identifier, function(removed)
             if removed then
-                serverNotify (xPlayer.source, "You are no longer eligible for social money!")
+                serverNotify(xPlayer.source, "You are no longer eligible for social money!")
             else
-                print ("[CITYHALL] - Error removing player from database || Name: " .. xPlayer.name .. " || Identifier: " .. identifier .. " || New Job: " .. job.name .. " || Last Job: " .. lastJob.name)
+                logErrorRemovingPlayer(xPlayer, job.name, lastJob.name)
             end
         end)
     end
@@ -135,40 +120,34 @@ end)
 
 ESX.RegisterServerCallback('k3_cityhall:checkJobForSocialMoney', function(source, callback)
     local xPlayer = ESX.GetPlayerFromId(source)
-    local playerJob = xPlayer.job.name
-
-    if isJobAllowed(playerJob) then
-        callback(true)
-    else
-        callback(false)
-    end
+    callback(isJobAllowed(xPlayer.job.name))
 end)
 
 function IsPlayerEligibleForSocialMoney(playerId, callback)
     local xPlayer = ESX.GetPlayerFromId(playerId)
     local identifier = xPlayer.identifier
     local playerJob = xPlayer.job.name
-    local allowedJobs = Config.SocialMoney.allowedJobs
 
-    if isJobAllowed(playerJob, allowedJobs) then
-        hasAppliedForSocialMoney(identifier, function(hasApplied)
-            callback(hasApplied)
-        end)
+    if isJobAllowed(playerJob) then
+        hasAppliedForSocialMoney(identifier, callback)
     else
         removeRecipientFromDatabase(identifier, function(removed)
-            if removed then
-                callback(false)
-            else
-                callback(true)
-                print ("[CITYHALL] - Error removing player from database || Name: " .. xPlayer.name .. " || Identifier: " .. identifier .. " || Job: " .. playerJob)
+            callback(not removed)
+            if not removed then
+                logErrorRemovingPlayer(xPlayer, playerJob)
             end
         end)
     end
 end
 
+-- Logging function to avoid repeated strings
+function logErrorRemovingPlayer(xPlayer, job, lastJob)
+    print("[CITYHALL] - Error removing player from database || Name: " .. xPlayer.name .. " || Identifier: " .. xPlayer.identifier .. " || Job: " .. job .. (lastJob and (" || Last Job: " .. lastJob) or ""))
+end
+
+
 
 --- SOCIAL MONEY EVENTS
-
 RegisterServerEvent('k3_cityhall:applyForSocialMoney')
 AddEventHandler('k3_cityhall:applyForSocialMoney', function()
     local xPlayer = ESX.GetPlayerFromId(source)
@@ -190,8 +169,6 @@ AddEventHandler('k3_cityhall:applyForSocialMoney', function()
     end
 end)
 
-
-
 RegisterServerEvent('k3_cityhall:collectStoredSocialMoney')
 AddEventHandler('k3_cityhall:collectStoredSocialMoney', function()
     local xPlayer = ESX.GetPlayerFromId(source)
@@ -200,11 +177,10 @@ AddEventHandler('k3_cityhall:collectStoredSocialMoney', function()
     if Config.SocialMoney.money.automaticMode then
         serverNotify(xPlayer.source, string.format("The social money is automatically collected every ~g~%s~s~ minutes.", Config.SocialMoney.money.paymentSchedule))
     else
-        if pendingSocialMoney[identifier] and pendingSocialMoney[identifier] > 0 then
-            local amount = pendingSocialMoney[identifier]
+        local amount = pendingSocialMoney[identifier] or 0
+        if amount > 0 then
             xPlayer.addMoney(amount)
             pendingSocialMoney[identifier] = nil
-
             serverNotify(xPlayer.source, string.format("You collected ~g~$%s~s~ from your social money.", amount))
         else
             serverNotify(xPlayer.source, "You don't have any pending social money.")
@@ -227,19 +203,14 @@ AddEventHandler('k3_cityhall:endSocialMoney', function()
 end)
 
 
-
-
 -- SOCIAL MONEY TIMER & MONEY SAVING FUNCTION
-
 local pendingSocialMoney = {}
+local timers = {}
 
 function StorePendingSocialMoney(identifier, amount)
     pendingSocialMoney[identifier] = (pendingSocialMoney[identifier] or 0) + amount
     serverNotify(source, string.format("You can collect now ~g~$%s~s~ from your social money in CITYHALL", pendingSocialMoney[identifier]))
 end
-
-
-local timers = {}
 
 function StartSocialMoneyTimer(src)
     local xPlayer = ESX.GetPlayerFromId(src)
@@ -247,12 +218,11 @@ function StartSocialMoneyTimer(src)
 
     local identifier = xPlayer.identifier
     local elapsedTime = 0
-    local continueLoop = true
 
     timers[identifier] = elapsedTime
 
     CreateThread(function()
-        while continueLoop do
+        while timers[identifier] do
             Wait(1000)
             elapsedTime = elapsedTime + 1
             timers[identifier] = elapsedTime
@@ -271,7 +241,7 @@ function StartSocialMoneyTimer(src)
                         end
                         elapsedTime = 0
                     else
-                        continueLoop = false
+                        timers[identifier] = nil
                     end
                 end)
             end
@@ -281,26 +251,16 @@ end
 
 function getRemainingTimeForPlayer(identifier)
     local elapsedTime = timers[identifier] or 0
-    local remainingTime = Config.SocialMoney.money.paymentSchedule * 60 - elapsedTime
-    return remainingTime
-end
-
-function getRemainingTimeFromDatabase(identifier)
-    return getRemainingTimeForPlayer(identifier)
+    return Config.SocialMoney.money.paymentSchedule * 60 - elapsedTime
 end
 
 RegisterServerEvent('k3_cityhall:getRemainingTime')
 AddEventHandler('k3_cityhall:getRemainingTime', function()
     local xPlayer = ESX.GetPlayerFromId(source)
     local identifier = xPlayer.identifier
-
-    local remainingTime = getRemainingTimeFromDatabase(identifier) 
-
+    local remainingTime = getRemainingTimeForPlayer(identifier)
     TriggerClientEvent('k3_cityhall:receiveRemainingTime', xPlayer.source, remainingTime)
 end)
-
-
-
 
 -- NAMECHANGE FUNCTIONS
 
@@ -345,25 +305,18 @@ AddEventHandler('k3_cityhall:changeName', function(newFirstName, newLastName)
 
     xPlayer.removeMoney(Config.Namechange.price)
 
-    if newFirstName then
-        MySQL.Async.execute('UPDATE users SET firstname = @firstname WHERE identifier = @identifier', {
-            ['@firstname'] = newFirstName,
-            ['@identifier'] = identifier
-        })
-    end
-
-    if newLastName then
-        MySQL.Async.execute('UPDATE users SET lastname = @lastname WHERE identifier = @identifier', {
-            ['@lastname'] = newLastName,
-            ['@identifier'] = identifier
-        })
-    end
-
-    serverNotify(xPlayer.source, "You have successfully changed your name. You are now: " .. newFirstName .. " " .. newLastName)
+    MySQL.Async.execute('UPDATE users SET firstname = @firstname, lastname = @lastname WHERE identifier = @identifier', {
+        ['@firstname'] = newFirstName,
+        ['@lastname'] = newLastName,
+        ['@identifier'] = identifier
+    }, function(rowsChanged)
+        if rowsChanged > 0 then
+            serverNotify(xPlayer.source, "You have successfully changed your name. You are now: " .. newFirstName .. " " .. newLastName)
+        else
+            serverNotify(xPlayer.source, "Error occurred while changing your name. Please try again.")
+        end
+    end)
 end)
-
-
-
 
 --- PLAYTIME TRACKER & REWARDS
 
@@ -381,18 +334,24 @@ function StartPlaytimeTracker(playerId, identifier)
     MySQL.Async.fetchScalar('SELECT playtime FROM users WHERE identifier = @identifier', {
         ['@identifier'] = identifier
     }, function(playtime)
+        if not playtime then
+            print("Error fetching playtime for: " .. identifier)
+            return
+        end
+
         local tracking = true
         local currentPlaytime = playtime or 0
 
         playerPlaytimes[identifier] = {
             tracking = tracking,
-            playtime = currentPlaytime
+            playtime = currentPlaytime,
+            nextRewardIndex = getNextRewardIndex(currentPlaytime)  -- Determine next eligible reward
         }
 
         CreateThread(function()
             while tracking do
-                Wait(60000)
-                currentPlaytime = currentPlaytime + 1
+                Wait(300000) -- Update every 5 minutes
+                currentPlaytime = currentPlaytime + 5
 
                 -- Update in-memory playtime
                 playerPlaytimes[identifier].playtime = currentPlaytime
@@ -405,13 +364,22 @@ function StartPlaytimeTracker(playerId, identifier)
                         print("Failed to update playtime for: " .. identifier)
                     end
                 end)
-                
+
                 if Config.PlaytimeRewards.enable then
                     CheckAndGiveRewards(xPlayer.source, identifier)
                 end
             end
         end)
     end)
+end
+
+function getNextRewardIndex(playtimeMinutes)
+    for idx, reward in ipairs(Config.PlaytimeRewards.rewards) do
+        if playtimeMinutes < reward.playtime then
+            return idx
+        end
+    end
+    return nil
 end
 
 function StartAllPlayersPlaytimeTracker()
@@ -435,39 +403,44 @@ end)
 
 function CheckAndGiveRewards(playerId, identifier)
     local xPlayer = ESX.GetPlayerFromId(playerId)
-    local playtimeMinutes = playerPlaytimes[identifier] or 0
+    local playerData = playerPlaytimes[identifier]
 
-    if not xPlayer then return end
+    if not xPlayer or not playerData then return end
 
-    local rewardedHoursSet = {}
+    local nextRewardIndex = playerData.nextRewardIndex or 1
 
     MySQL.Async.fetchAll('SELECT playtime_rewarded FROM k3_playtime_rewards WHERE identifier = @identifier', {
         ['@identifier'] = identifier
     }, function(rewardedPlaytimes)
+        local rewardedHoursSet = {}
         for _, row in ipairs(rewardedPlaytimes) do
             rewardedHoursSet[row.playtime_rewarded] = true
         end
 
-        for _, reward in ipairs(Config.PlaytimeRewards.rewards) do
-            if playtimeMinutes >= reward.playtime and not rewardedHoursSet[reward.playtime] then
+        for idx = nextRewardIndex, #Config.PlaytimeRewards.rewards do
+            local reward = Config.PlaytimeRewards.rewards[idx]
+
+            if playerData.playtime < reward.playtime then
+                playerData.nextRewardIndex = idx
+                break
+            end
+
+            if not rewardedHoursSet[reward.playtime] then
                 if reward.type == 'money' then
                     if reward.subtype == 'cash' then
                         xPlayer.addMoney(reward.value)
-                        serverNotify(xPlayer.source, "You got rewarded for: " .. reward.playtime .. " minutes. You got: $ " .. reward.value .. " cash")
                     elseif reward.subtype == 'bank' then
                         xPlayer.addAccountMoney('bank', reward.value)
-                        serverNotify(xPlayer.source, "You got rewarded for: " .. reward.playtime .. " minutes. You got: $ " .. reward.value .. " bank")
                     elseif reward.subtype == 'black_money' then
                         xPlayer.addAccountMoney('black_money', reward.value)
-                        serverNotify(xPlayer.source, "You got rewarded for: " .. reward.playtime .. " minutes. You got: $ " .. reward.value .. " black money")
                     end
                 elseif reward.type == 'item' then
                     xPlayer.addInventoryItem(reward.value, reward.count)
-                    serverNotify(xPlayer.source, "You got rewarded for: " .. reward.playtime .. " minutes. You got: " .. reward.count .. "x " .. reward.value)
                 elseif reward.type == 'weapon' then
                     xPlayer.addWeapon(reward.value, reward.ammo)
-                    serverNotify(xPlayer.source, "You got rewarded for: " .. reward.playtime .. " minutes. You got: " .. reward.value .. " with " .. reward.ammo .. " ammo")
                 end
+
+                serverNotify(xPlayer.source, getRewardMessage(reward))
 
                 MySQL.Async.execute('INSERT INTO k3_playtime_rewards (identifier, playtime_rewarded) VALUES (@identifier, @playtime)', {
                     ['@identifier'] = identifier,
@@ -478,9 +451,16 @@ function CheckAndGiveRewards(playerId, identifier)
     end)
 end
 
-
-
-
+function getRewardMessage(reward)
+    if reward.type == 'money' then
+        return string.format("You got rewarded for: %s minutes. You got: $ %s %s", reward.playtime, reward.value, reward.subtype)
+    elseif reward.type == 'item' then
+        return string.format("You got rewarded for: %s minutes. You got: %sx %s", reward.playtime, reward.count, reward.value)
+    elseif reward.type == 'weapon' then
+        return string.format("You got rewarded for: %s minutes. You got: %s with %s ammo", reward.playtime, reward.value, reward.ammo)
+    end
+    return ""
+end
 
 
 -- STATS
