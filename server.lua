@@ -74,6 +74,7 @@ AddEventHandler('esx:playerLoaded', function(playerId, xPlayer)
     end
 
     StartPlaytimeTracker(playerId, identifier)
+    
 end)
 
 
@@ -435,7 +436,7 @@ end)
 
 function CheckAndGiveRewards(playerId, identifier)
     local xPlayer = ESX.GetPlayerFromId(playerId)
-    local playtimeMinutes = playerPlaytimes[identifier] or 0
+    local playtimeMinutes = playerPlaytimes[identifier] and playerPlaytimes[identifier].playtime or 0
 
     if not xPlayer then return end
 
