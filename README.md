@@ -44,4 +44,4 @@ exports('GetPlayerKills', GetPlayerKills)
 exports('GetPlayerDeaths', GetPlayerDeaths)
 exports('GetPlayerKDRatio', GetPlayerKDRatio)
 exports('GetPlayerPlaytime', GetPlayerPlaytime)
-exports('ConverToKD', ConverToKD)
+
