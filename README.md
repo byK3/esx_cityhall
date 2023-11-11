@@ -1,9 +1,5 @@
 # Cityhall Script for FiveM
 
-🚧 **BETA Version Notice** 🚧
-
-This script is in its BETA phase. We've conducted thorough testing, but please be aware of potential unforeseen issues or bugs.
-
 ## 🌟 Features
 
 ### Namechange Office
