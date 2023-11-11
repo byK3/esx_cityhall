@@ -127,8 +127,6 @@ AddEventHandler('esx:setJob', function(playerId, job, lastJob)
         removeRecipientFromDatabase(identifier, function(removed)
             if removed then
                 serverNotify (xPlayer.source, "You are no longer eligible for social money!")
-            else
-                print ("[CITYHALL] - Error removing player from database || Name: " .. xPlayer.name .. " || Identifier: " .. identifier .. " || New Job: " .. job.name .. " || Last Job: " .. lastJob.name)
             end
         end)
     end
@@ -161,7 +159,6 @@ function IsPlayerEligibleForSocialMoney(playerId, callback)
                 callback(false)
             else
                 callback(true)
-                print ("[CITYHALL] - Error removing player from database || Name: " .. xPlayer.name .. " || Identifier: " .. identifier .. " || Job: " .. playerJob)
             end
         end)
     end
@@ -862,7 +859,7 @@ AddEventHandler('k3_cityhall:requestDivorce', function()
                 end)
             end)
         else
-            TriggerClientEvent('esx:showNotification', xPlayer.source, "You are not married.")
+            serverNotify(xPlayer.source, "You are not married.")
         end
     end)
 end)
@@ -902,21 +899,30 @@ ESX.RegisterServerCallback('k3_cityhall:getTopRichest', function(source, cb)
     if Config.Leaderboard.enable then
         local limit = Config.Leaderboard.leaderboard.limit
         local sortBy = Config.Leaderboard.leaderboard.sortBy
+        local query = ''
 
-        if sortBy == "bank" then
-            MySQL.Async.fetchAll('SELECT firstname, lastname, JSON_UNQUOTE(JSON_EXTRACT(accounts, "$.bank")) AS bank FROM users ORDER BY CAST(JSON_UNQUOTE(JSON_EXTRACT(accounts, "$.bank")) AS UNSIGNED) DESC LIMIT @limit', {
-                ['@limit'] = limit
-            }, function(result)
-                cb(result)
-            end)
-        elseif sortBy == "money" then
-            MySQL.Async.fetchAll('SELECT firstname, lastname, JSON_UNQUOTE(JSON_EXTRACT(accounts, "$.money")) AS money FROM users ORDER BY CAST(JSON_UNQUOTE(JSON_EXTRACT(accounts, "$.money")) AS UNSIGNED) DESC LIMIT @limit', {
-                ['@limit'] = limit
-            }, function(result)
-                cb(result)
-            end)
-        elseif sortBy == "black_money" then
-            MySQL.Async.fetchAll('SELECT firstname, lastname, JSON_UNQUOTE(JSON_EXTRACT(accounts, "$.black_money")) AS black_money FROM users ORDER BY CAST(JSON_UNQUOTE(JSON_EXTRACT(accounts, "$.black_money")) AS UNSIGNED) DESC LIMIT @limit', {
+        if Config.Leaderboard.ignoreList.richestPlayers then
+            local ignoredIdentifiers = "'" .. table.concat(Config.Leaderboard.ignoreIdentifiers, "','") .. "'"
+
+            if sortBy == "bank" then
+                query = 'SELECT firstname, lastname, JSON_UNQUOTE(JSON_EXTRACT(accounts, "$.bank")) AS bank FROM users WHERE identifier NOT IN (' .. ignoredIdentifiers .. ') ORDER BY CAST(JSON_UNQUOTE(JSON_EXTRACT(accounts, "$.bank")) AS UNSIGNED) DESC LIMIT @limit'
+            elseif sortBy == "money" then
+                query = 'SELECT firstname, lastname, JSON_UNQUOTE(JSON_EXTRACT(accounts, "$.money")) AS money FROM users WHERE identifier NOT IN (' .. ignoredIdentifiers .. ') ORDER BY CAST(JSON_UNQUOTE(JSON_EXTRACT(accounts, "$.money")) AS UNSIGNED) DESC LIMIT @limit'
+            elseif sortBy == "black_money" then
+                query = 'SELECT firstname, lastname, JSON_UNQUOTE(JSON_EXTRACT(accounts, "$.black_money")) AS black_money FROM users WHERE identifier NOT IN (' .. ignoredIdentifiers .. ') ORDER BY CAST(JSON_UNQUOTE(JSON_EXTRACT(accounts, "$.black_money")) AS UNSIGNED) DESC LIMIT @limit'
+            end
+        else
+            if sortBy == "bank" then
+                query = 'SELECT firstname, lastname, JSON_UNQUOTE(JSON_EXTRACT(accounts, "$.bank")) AS bank FROM users ORDER BY CAST(JSON_UNQUOTE(JSON_EXTRACT(accounts, "$.bank")) AS UNSIGNED) DESC LIMIT @limit'
+            elseif sortBy == "money" then
+                query = 'SELECT firstname, lastname, JSON_UNQUOTE(JSON_EXTRACT(accounts, "$.money")) AS money FROM users ORDER BY CAST(JSON_UNQUOTE(JSON_EXTRACT(accounts, "$.money")) AS UNSIGNED) DESC LIMIT @limit'
+            elseif sortBy == "black_money" then
+                query = 'SELECT firstname, lastname, JSON_UNQUOTE(JSON_EXTRACT(accounts, "$.black_money")) AS black_money FROM users ORDER BY CAST(JSON_UNQUOTE(JSON_EXTRACT(accounts, "$.black_money")) AS UNSIGNED) DESC LIMIT @limit'
+            end
+        end
+
+        if query ~= '' then
+            MySQL.Async.fetchAll(query, {
                 ['@limit'] = limit
             }, function(result)
                 cb(result)
@@ -931,27 +937,119 @@ end)
 
 ESX.RegisterServerCallback('k3_cityhall:getTopPlaytime', function(source, cb)
     local limit = Config.Leaderboard.leaderboard.limit
-    MySQL.Async.fetchAll('SELECT firstname, lastname, playtime FROM users ORDER BY playtime DESC LIMIT @limit', {
-        ['@limit'] = limit
-    }, function(results)
-        cb(results)
-    end)
+    local query = ''
+
+    if Config.Leaderboard.ignoreList.mostPlaytime then
+        local ignoredIdentifiers = "'" .. table.concat(Config.Leaderboard.ignoreIdentifiers, "','") .. "'"
+        query = 'SELECT firstname, lastname, playtime FROM users WHERE identifier NOT IN (' .. ignoredIdentifiers .. ') ORDER BY playtime DESC LIMIT @limit'
+    else
+        query = 'SELECT firstname, lastname, playtime FROM users ORDER BY playtime DESC LIMIT @limit'
+    end
+
+    if query ~= '' then
+        MySQL.Async.fetchAll(query, {
+            ['@limit'] = limit
+        }, function(results)
+            cb(results)
+        end)
+    else
+        cb(nil)
+    end
+
+
+
 end)
 
 ESX.RegisterServerCallback('k3_cityhall:getTopKills', function(source, cb)
     local limit = Config.Leaderboard.leaderboard.limit
-    MySQL.Async.fetchAll('SELECT firstname, lastname, kills FROM users ORDER BY kills DESC LIMIT @limit', {
-        ['@limit'] = limit
-    }, function(results)
-        cb(results)
-    end)
+    local query = ''
+
+
+    if Config.Leaderboard.ignoreList.mostKills then
+        local ignoredIdentifiers = "'" .. table.concat(Config.Leaderboard.ignoreIdentifiers, "','") .. "'"
+        query = 'SELECT firstname, lastname, kills FROM users WHERE identifier NOT IN (' .. ignoredIdentifiers .. ') ORDER BY kills DESC LIMIT @limit'
+    else
+        query = 'SELECT firstname, lastname, kills FROM users ORDER BY kills DESC LIMIT @limit'
+    end
+
+    if query ~= '' then
+        MySQL.Async.fetchAll(query, {
+            ['@limit'] = limit
+        }, function(results)
+            cb(results)
+        end)
+    else
+        cb(nil)
+    end
 end)
 
 ESX.RegisterServerCallback('k3_cityhall:getTopDeaths', function(source, cb)
     local limit = Config.Leaderboard.leaderboard.limit
-    MySQL.Async.fetchAll('SELECT firstname, lastname, deaths FROM users ORDER BY deaths DESC LIMIT @limit', {
-        ['@limit'] = limit
-    }, function(results)
-        cb(results)
-    end)
+    local query = ''
+
+
+    if Config.Leaderboard.ignoreList.mostDeaths then
+        local ignoredIdentifiers = "'" .. table.concat(Config.Leaderboard.ignoreIdentifiers, "','") .. "'"
+        query = 'SELECT firstname, lastname, deaths FROM users WHERE identifier NOT IN (' .. ignoredIdentifiers .. ') ORDER BY deaths DESC LIMIT @limit'
+    else
+        query = 'SELECT firstname, lastname, deaths FROM users ORDER BY deaths DESC LIMIT @limit'
+    end
+
+
+    if query ~= '' then
+        MySQL.Async.fetchAll(query, {
+            ['@limit'] = limit
+        }, function(results)
+            cb(results)
+        end)
+    else
+        cb(nil)
+    end
+
 end)
+
+
+
+--- EXPORTS
+
+function GetPlayerKills(identifier)
+    local kills = MySQL.Sync.fetchScalar('SELECT kills FROM users WHERE identifier = @identifier', {
+        ['@identifier'] = identifier
+    })
+    return kills or 0
+end
+
+function GetPlayerDeaths(identifier)
+    local deaths = MySQL.Sync.fetchScalar('SELECT deaths FROM users WHERE identifier = @identifier', {
+        ['@identifier'] = identifier
+    })
+    return deaths or 0
+end
+
+function GetPlayerKDRatio(identifier)
+    local kd_ratio = MySQL.Sync.fetchScalar('SELECT kd_ratio FROM users WHERE identifier = @identifier', {
+        ['@identifier'] = identifier
+    })
+    return kd_ratio or 0
+end
+
+function GetPlayerPlaytime(identifier)
+    local playtime = MySQL.Sync.fetchScalar('SELECT playtime FROM users WHERE identifier = @identifier', {
+        ['@identifier'] = identifier
+    })
+    return playtime or 0
+end
+
+function ConverToKD(identifier)
+    local kills = GetPlayerKills(identifier)
+    local deaths = GetPlayerDeaths(identifier)
+    local kd = (deaths == 0) and kills or (kills / deaths)
+
+    return kd
+end
+
+exports('GetPlayerKills', GetPlayerKills)
+exports('GetPlayerDeaths', GetPlayerDeaths)
+exports('GetPlayerKDRatio', GetPlayerKDRatio)
+exports('GetPlayerPlaytime', GetPlayerPlaytime)
+exports('ConverToKD', ConverToKD)
