@@ -99,6 +99,17 @@ Config.Leaderboard = {
         limit = 5, -- The amount of players shown in the leaderboard
         sortBy = "bank", -- The value to sort by (bank, money, black_money) || Just for "Richest Players"
     },
+    
+    ignoreList = {
+        richestPlayers = false,
+        mostPlaytime = false,
+        mostKills = false,
+        mostDeaths = false,
+    },
+
+    ignoreIdentifiers = { 
+        "steam:11000010c0a0b2e", -- Example: "steam:11000010c0a0b2e"
+    },
 
 }
 
@@ -125,7 +136,7 @@ Config.Stats = {
     },
 
     house = {
-        tableName = 'owned_properties', -- The name of the table in the database
+        tableName = 'houses', -- The name of the table in the database
         ownerColumn = 'owner', -- The name of the owner column in the database
     }
 }
