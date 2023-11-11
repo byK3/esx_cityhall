@@ -44,16 +44,19 @@ exports('GetPlayerKills', GetPlayerKills)
 exports('GetPlayerDeaths', GetPlayerDeaths)
 exports('GetPlayerKDRatio', GetPlayerKDRatio)
 exports('GetPlayerPlaytime', GetPlayerPlaytime)
+```
 
 📖 Usage Example
+```lua
 local kills = exports.k3_cityhall:GetPlayerKills(playerIdentifier)
 local deaths = exports.k3_cityhall:GetPlayerDeaths(playerIdentifier)
 local kd_ratio = exports.k3_cityhall:GetPlayerKDRatio(playerIdentifier)
 local playtime = exports.k3_cityhall:GetPlayerPlaytime(playerIdentifier)
 
 print('Kills:', kills, 'Deaths:', deaths, 'KD Ratio:', kd_ratio, 'Playtime:', playtime)
-
 ````
+Stay tuned for more updates and enhancements as we continue to develop and refine the Cityhall experience for FiveM!
 
 
-Ensure that you replace placeholders like `playerIdentifier` with actual variables or identifiers used in your script. Adjust the README as necessary to fit the actual usage and capabilities of your script.
+
+Ensure that you replace placeholders like `playerIdentifier` with actual variables or identifiers used in your script.
