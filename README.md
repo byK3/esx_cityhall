@@ -38,5 +38,13 @@ exports('ConverToKD', ConverToKD)
 
 USAGE EXAMPLE:
 
+local kills = exports.k3_cityhall:GetPlayerKills(playerIdentifier)
+local deaths = exports.k3_cityhall:GetPlayerDeaths(playerIdentifier)
+local kd_ratio = exports.k3_cityhall:GetPlayerKDRatio(playerIdentifier)
+local playtime = exports.k3_cityhall:GetPlayerPlaytime(playerIdentifier)
+local kd = exports.k3_cityhall:ConverToKD(playerIdentifier)
+
+print('Kills:', kills, 'Deaths:', deaths, 'KD Ratio:', kd_ratio, 'Playtime:', playtime, 'KD:', kd)
+
 
 
