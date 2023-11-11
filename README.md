@@ -45,3 +45,11 @@ exports('GetPlayerDeaths', GetPlayerDeaths)
 exports('GetPlayerKDRatio', GetPlayerKDRatio)
 exports('GetPlayerPlaytime', GetPlayerPlaytime)
 
+📖 Usage Example
+local kills = exports.k3_cityhall:GetPlayerKills(playerIdentifier)
+local deaths = exports.k3_cityhall:GetPlayerDeaths(playerIdentifier)
+local kd_ratio = exports.k3_cityhall:GetPlayerKDRatio(playerIdentifier)
+local playtime = exports.k3_cityhall:GetPlayerPlaytime(playerIdentifier)
+
+print('Kills:', kills, 'Deaths:', deaths, 'KD Ratio:', kd_ratio, 'Playtime:', playtime)
+
