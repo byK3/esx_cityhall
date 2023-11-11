@@ -1040,14 +1040,6 @@ function GetPlayerPlaytime(identifier)
     return playtime or 0
 end
 
-function ConverToKD(identifier)
-    local kills = GetPlayerKills(identifier)
-    local deaths = GetPlayerDeaths(identifier)
-    local kd = (deaths == 0) and kills or (kills / deaths)
-
-    return kd
-end
-
 exports('GetPlayerKills', GetPlayerKills)
 exports('GetPlayerDeaths', GetPlayerDeaths)
 exports('GetPlayerKDRatio', GetPlayerKDRatio)
