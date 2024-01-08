@@ -116,7 +116,7 @@ Config.Leaderboard = {
 Config.PlaytimeRewards = {
     enable = true, -- If false, the rewards will be disabled
 
-    rewards = {
+    rewards = { -- playtime in minute
         {playtime = 1, type = 'money', subtype = 'cash', value = 500}, 
         {playtime = 3, type = 'money', subtype = 'bank', value = 1000},
         {playtime = 5, type = 'money', subtype = 'black_money', value = 1000}, 
